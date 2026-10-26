@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -17,16 +18,20 @@ import (
 
 func listDirToolCall(arguments string) string {
 	return `{
-  "message": {
-    "role": "assistant",
-    "content": "",
-    "tool_calls": [{
-      "function": {
-        "name": "list_dir",
-        "arguments": ` + arguments + `
-      }
-    }]
-  }
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "id": "call_list_dir",
+        "type": "function",
+        "function": {
+          "name": "list_dir",
+          "arguments": ` + strconv.Quote(arguments) + `
+        }
+      }]
+    }
+  }]
 }`
 }
 
@@ -102,19 +107,16 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/show":
-			var payload struct {
-				Model string `json:"model"`
-			}
-			if err := json.Unmarshal(body, &payload); err != nil {
-				t.Errorf("decode show: %v", err)
+		case "/v1/models/test-model":
+			if r.Method != http.MethodGet {
+				t.Errorf("method %s", r.Method)
 				return
 			}
 			mu.Lock()
-			sawModel = payload.Model
+			sawModel = "test-model"
 			mu.Unlock()
-			_, _ = io.WriteString(w, `{}`)
-		case "/api/chat":
+			_, _ = io.WriteString(w, `{"id":"test-model"}`)
+		case "/v1/chat/completions":
 			var payload struct {
 				Tools []any `json:"tools"`
 			}
@@ -126,7 +128,7 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 				_, _ = io.WriteString(w, listDirToolCall(`{"path":"."}`))
 				return
 			}
-			_, _ = io.WriteString(w, `{"message":{"role":"assistant","content":"There are 3 lines."}}`)
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"There are 3 lines."}}]}`)
 		default:
 			http.NotFound(w, r)
 		}

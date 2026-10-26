@@ -7,12 +7,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
 const maxResponseBytes = 8 << 20
 
-// Client talks to one Ollama daemon.
+// defaultReasoningEffort is sent as reasoning_effort on every chat request.
+const defaultReasoningEffort = "low"
+
+// Client talks to one Ollama daemon through its OpenAI-compatible API.
 type Client struct {
 	baseURL string
 	http    *http.Client
@@ -26,35 +30,43 @@ func New(baseURL string) *Client {
 	}
 }
 
-type showRequest struct {
-	Model string `json:"model"`
-}
-
 type chatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Tools    []Tool    `json:"tools,omitempty"`
-	Stream   bool      `json:"stream"`
+	Model           string    `json:"model"`
+	Messages        []Message `json:"messages"`
+	Tools           []Tool    `json:"tools,omitempty"`
+	Stream          bool      `json:"stream"`
+	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
 }
 
 type chatResponse struct {
-	Message Message `json:"message"`
+	Choices []chatChoice `json:"choices"`
 }
 
-// Show checks that the daemon is up and the model is present.
+type chatChoice struct {
+	Message apiMessage `json:"message"`
+}
+
+// apiMessage decodes a choice. Content is null when the model only calls tools.
+type apiMessage struct {
+	Role      string     `json:"role"`
+	Content   *string    `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls"`
+}
+
+// Show checks that the server is up and the model is present.
 func (c *Client) Show(ctx context.Context, model string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	payload := showRequest{Model: model}
-	if err := c.post(ctx, "/api/show", payload, nil); err != nil {
-		return fmt.Errorf("show model %q: %w", model, err)
+	path := "/v1/models/" + url.PathEscape(model)
+	if err := c.do(ctx, http.MethodGet, path, nil, nil); err != nil {
+		return fmt.Errorf("model %q: %w", model, err)
 	}
 	return nil
 }
 
-// Chat sends one non-streaming chat request.
+// Chat sends one non-streaming chat completion.
 // An empty tools slice omits tools from the request.
 func (c *Client) Chat(ctx context.Context, model string, messages []Message, tools []Tool) (Message, error) {
 	if err := ctx.Err(); err != nil {
@@ -65,18 +77,33 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message, too
 	}
 
 	payload := chatRequest{
-		Model:    model,
-		Messages: messages,
-		Tools:    tools,
-		Stream:   false,
+		Model:           model,
+		Messages:        messages,
+		Tools:           tools,
+		Stream:          false,
+		ReasoningEffort: defaultReasoningEffort,
 	}
 
 	var decoded chatResponse
-	if err := c.post(ctx, "/api/chat", payload, &decoded); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/chat/completions", payload, &decoded); err != nil {
 		return Message{}, fmt.Errorf("chat: %w", err)
 	}
+	if len(decoded.Choices) == 0 {
+		return Message{}, fmt.Errorf("chat: no choices")
+	}
+	return decoded.Choices[0].Message.message(), nil
+}
 
-	msg := decoded.Message
+func (m apiMessage) message() Message {
+	content := ""
+	if m.Content != nil {
+		content = *m.Content
+	}
+	msg := Message{
+		Role:      m.Role,
+		Content:   content,
+		ToolCalls: m.ToolCalls,
+	}
 	if msg.Role == "" {
 		msg.Role = "assistant"
 	}
@@ -84,24 +111,36 @@ func (c *Client) Chat(ctx context.Context, model string, messages []Message, too
 		msg.ToolCalls = []ToolCall{}
 	}
 	for i := range msg.ToolCalls {
+		if msg.ToolCalls[i].ID == "" {
+			msg.ToolCalls[i].ID = fmt.Sprintf("call_%d", i+1)
+		}
+		if msg.ToolCalls[i].Type == "" {
+			msg.ToolCalls[i].Type = "function"
+		}
 		if msg.ToolCalls[i].Function.Arguments == nil {
-			msg.ToolCalls[i].Function.Arguments = map[string]any{}
+			msg.ToolCalls[i].Function.Arguments = Arguments{}
 		}
 	}
-	return msg, nil
+	return msg
 }
 
-func (c *Client) post(ctx context.Context, path string, payload any, dest any) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("encoding request: %w", err)
+func (c *Client) do(ctx context.Context, method, path string, payload any, dest any) error {
+	var body io.Reader
+	if payload != nil {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("encoding request: %w", err)
+		}
+		body = bytes.NewReader(encoded)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return fmt.Errorf("building request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

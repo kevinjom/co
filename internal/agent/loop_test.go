@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -15,22 +16,37 @@ import (
 
 func listDirToolCall(arguments string) string {
 	return `{
-  "message": {
-    "role": "assistant",
-    "content": "",
-    "tool_calls": [{
-      "function": {
-        "name": "list_dir",
-        "arguments": ` + arguments + `
-      }
-    }]
-  }
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "id": "call_list_dir",
+        "type": "function",
+        "function": {
+          "name": "list_dir",
+          "arguments": ` + strconv.Quote(arguments) + `
+        }
+      }]
+    }
+  }]
 }`
 }
 
 type recordedChat struct {
-	Tools  []any `json:"tools"`
-	Stream bool  `json:"stream"`
+	Messages []struct {
+		Role       string `json:"role"`
+		ToolCallID string `json:"tool_call_id"`
+		ToolCalls  []struct {
+			ID       string `json:"id"`
+			Function struct {
+				Arguments string `json:"arguments"`
+			} `json:"function"`
+		} `json:"tool_calls"`
+	} `json:"messages"`
+	Tools           []any  `json:"tools"`
+	Stream          bool   `json:"stream"`
+	ReasoningEffort string `json:"reasoning_effort"`
 }
 
 func TestTurnRunsToolThenAnswers(t *testing.T) {
@@ -53,12 +69,15 @@ func TestTurnRunsToolThenAnswers(t *testing.T) {
 		n := len(calls)
 		mu.Unlock()
 
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path %s", r.URL.Path)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if n == 1 {
 			_, _ = io.WriteString(w, listDirToolCall(`{"path":"."}`))
 			return
 		}
-		_, _ = io.WriteString(w, `{"message":{"role":"assistant","content":"two files"}}`)
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"two files"}}]}`)
 	}))
 	defer server.Close()
 
@@ -88,6 +107,23 @@ func TestTurnRunsToolThenAnswers(t *testing.T) {
 	if len(calls[1].Tools) == 0 || calls[1].Stream {
 		t.Fatalf("second call omitted tools or streamed")
 	}
+	for i, call := range calls {
+		if call.ReasoningEffort != "low" {
+			t.Fatalf("call %d reasoning_effort = %q", i+1, call.ReasoningEffort)
+		}
+	}
+	followUp := calls[1].Messages
+	if len(followUp) != 4 {
+		t.Fatalf("follow-up messages = %d", len(followUp))
+	}
+	assistant := followUp[2]
+	if len(assistant.ToolCalls) != 1 || assistant.ToolCalls[0].Function.Arguments != `{"path":"."}` {
+		t.Fatalf("assistant tool call %+v", assistant.ToolCalls)
+	}
+	toolMsg := followUp[3]
+	if toolMsg.Role != "tool" || toolMsg.ToolCallID != assistant.ToolCalls[0].ID {
+		t.Fatalf("tool message %+v", toolMsg)
+	}
 }
 
 func TestTurnDropsToolsAfterCap(t *testing.T) {
@@ -115,7 +151,7 @@ func TestTurnDropsToolsAfterCap(t *testing.T) {
 			_, _ = io.WriteString(w, listDirToolCall(`{}`))
 			return
 		}
-		_, _ = io.WriteString(w, `{"message":{"role":"assistant","content":"stopped"}}`)
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"stopped"}}]}`)
 	}))
 	defer server.Close()
 

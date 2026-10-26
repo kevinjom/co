@@ -74,9 +74,9 @@ func (s *Session) runTools(ctx context.Context, calls []ollama.ToolCall, trace T
 			trace(toolTrace(call))
 		}
 		s.messages = append(s.messages, ollama.Message{
-			Role:     "tool",
-			Content:  s.tools.Run(ctx, call.Function.Name, call.Function.Arguments),
-			ToolName: call.Function.Name,
+			Role:       "tool",
+			Content:    s.tools.Run(ctx, call.Function.Name, map[string]any(call.Function.Arguments)),
+			ToolCallID: call.ID,
 		})
 	}
 }
@@ -112,7 +112,7 @@ func toolDefinitions(set *tools.Set) []ollama.Tool {
 func toolTrace(call ollama.ToolCall) string {
 	args := call.Function.Arguments
 	if args == nil {
-		args = map[string]any{}
+		args = ollama.Arguments{}
 	}
 
 	detail := ""

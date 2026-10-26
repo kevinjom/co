@@ -10,11 +10,23 @@ import (
 	"strings"
 
 	"co/internal/agent"
+	"co/internal/ui"
 
 	"github.com/spf13/cobra"
 )
 
-func repl(cmd *cobra.Command, signals *signalSession, session *agent.Session) error {
+func repl(cmd *cobra.Command, signals *signalSession, session *agent.Session, modelName, cwd string) error {
+	if isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout()) {
+		err := ui.Run(signals.ctx, session, modelName, cwd)
+		if err != nil && signals.ctx.Err() != nil {
+			return signals.err()
+		}
+		return err
+	}
+	return lineRepl(cmd, signals, session)
+}
+
+func lineRepl(cmd *cobra.Command, signals *signalSession, session *agent.Session) error {
 	in := cmd.InOrStdin()
 	lines := newLineReader(in)
 	interactive := isTerminal(in)
@@ -59,8 +71,8 @@ func repl(cmd *cobra.Command, signals *signalSession, session *agent.Session) er
 	}
 }
 
-func isTerminal(r io.Reader) bool {
-	file, ok := r.(*os.File)
+func isTerminal(v any) bool {
+	file, ok := v.(*os.File)
 	if !ok {
 		return false
 	}

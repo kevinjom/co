@@ -153,5 +153,5 @@ func run(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("working directory: %w", err)
 	}
 	session := agent.NewSession(client, model, cwd)
-	return repl(cmd, signals, session)
+	return repl(cmd, signals, session, model, cwd)
 }

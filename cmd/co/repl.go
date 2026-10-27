@@ -10,23 +10,25 @@ import (
 	"strings"
 
 	"co/internal/agent"
+	"co/internal/command"
 	"co/internal/ui"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 
-func repl(cmd *cobra.Command, signals *signalSession, session *agent.Session, modelName, cwd string) error {
+func repl(cmd *cobra.Command, signals *signalSession, app *command.App, cwd string) error {
 	if isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout()) {
-		err := ui.Run(signals.ctx, session, modelName, cwd)
+		err := ui.Run(signals.ctx, app, cwd)
 		if err != nil && signals.ctx.Err() != nil {
 			return signals.err()
 		}
 		return err
 	}
-	return lineRepl(cmd, signals, session)
+	return lineRepl(cmd, signals, app)
 }
 
-func lineRepl(cmd *cobra.Command, signals *signalSession, session *agent.Session) error {
+func lineRepl(cmd *cobra.Command, signals *signalSession, app *command.App) error {
 	in := cmd.InOrStdin()
 	lines := newLineReader(in)
 	interactive := isTerminal(in)
@@ -54,8 +56,19 @@ func lineRepl(cmd *cobra.Command, signals *signalSession, session *agent.Session
 		if line == "" {
 			continue
 		}
-		if line == "exit" || line == "quit" {
-			return nil
+		if handled, err := runLineCommand(cmd, signals, app, line); handled {
+			if errors.Is(err, errQuit) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		session := app.Session()
+		if session == nil {
+			return usageError(fmt.Errorf("model is required: set --model as provider/model-id, or set model in ~/.co.yaml"))
 		}
 
 		wrote := false
@@ -88,6 +101,78 @@ func lineRepl(cmd *cobra.Command, signals *signalSession, session *agent.Session
 			return err
 		}
 	}
+}
+
+func runLineCommand(cmd *cobra.Command, signals *signalSession, app *command.App, line string) (bool, error) {
+	in := cmd.InOrStdin()
+	interactive := isTerminal(in)
+	parsed := command.Parse(line)
+	stderr := cmd.ErrOrStderr()
+	switch parsed.Kind {
+	case command.KindChat:
+		return false, nil
+	case command.KindQuit:
+		return true, errQuit
+	case command.KindError:
+		fmt.Fprintln(stderr, parsed.Err)
+		return true, nil
+	case command.KindModels:
+		if parsed.Arg == "" {
+			ids, err := app.Models(signals.ctx)
+			for _, id := range ids {
+				fmt.Fprintln(stderr, id)
+			}
+			if err != nil {
+				fmt.Fprintln(stderr, err)
+			}
+			return true, nil
+		}
+		if err := app.Select(signals.ctx, parsed.Arg); err != nil {
+			if signals.ctx.Err() != nil {
+				return true, signals.err()
+			}
+			fmt.Fprintln(stderr, err)
+			return true, nil
+		}
+		fmt.Fprintf(stderr, "model %s\n", app.Model())
+		return true, nil
+	case command.KindConnect:
+		if !interactive {
+			return true, usageError(app.RejectConnect(parsed.Arg))
+		}
+		if err := app.CanConnect(parsed.Arg); err != nil {
+			fmt.Fprintln(stderr, err)
+			return true, nil
+		}
+		fmt.Fprintf(stderr, "API key for %s: ", parsed.Arg)
+		key, err := readSecret(in)
+		fmt.Fprintln(stderr)
+		if err != nil {
+			return true, err
+		}
+		if err := app.Connect(parsed.Arg, key); err != nil {
+			fmt.Fprintln(stderr, err)
+			return true, nil
+		}
+		fmt.Fprintf(stderr, "saved key for %s\n", parsed.Arg)
+		return true, nil
+	default:
+		panic(fmt.Sprintf("unhandled command kind %d", parsed.Kind))
+	}
+}
+
+var errQuit = errors.New("quit")
+
+func readSecret(r io.Reader) (string, error) {
+	file, ok := r.(*os.File)
+	if !ok || !isTerminal(file) {
+		return "", usageError(fmt.Errorf("connect: run /connect in a terminal"))
+	}
+	buf, err := term.ReadPassword(file.Fd())
+	if err != nil {
+		return "", fmt.Errorf("reading api key: %w", err)
+	}
+	return string(buf), nil
 }
 
 func isTerminal(v any) bool {

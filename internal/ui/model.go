@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"co/internal/agent"
+	"co/internal/command"
 )
 
 const (
@@ -53,13 +54,33 @@ type turnDoneMsg struct {
 	err    error
 }
 
+type inputMode int
+
+const (
+	modeChat inputMode = iota
+	modeModels
+	modeConnect
+)
+
 // model is the interactive session. The program stays in Bubble Tea's default
 // inline mode: View is redrawn in place, and history scrolls inside the viewport.
 type model struct {
 	session   *agent.Session
+	director  Director
 	ctx       context.Context
 	modelName string
 	cwd       string
+	mode      inputMode
+	startup   bool
+	pending   bool
+
+	filter       string
+	cursor       int
+	modelIDs     []string
+	modelsLoaded bool
+	pickerErr    string
+	connectID    string
+	secret       string
 
 	theme    theme
 	input    textarea.Model
@@ -130,6 +151,9 @@ func newInput(th theme) textarea.Model {
 }
 
 func (m *model) Init() tea.Cmd {
+	if m.mode == modeModels {
+		return tea.Batch(m.fetchModels(), tea.RequestBackgroundColor)
+	}
 	return tea.Batch(m.input.Focus(), tea.RequestBackgroundColor)
 }
 
@@ -156,6 +180,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
 
+	case tea.PasteMsg:
+		return m.onPaste(msg.Content)
+
+	case modelsLoadedMsg:
+		return m.onModels(msg)
+
+	case selectDoneMsg:
+		return m.onSelected(msg)
+
+	case connectDoneMsg:
+		return m.onConnected(msg)
+
 	case spinner.TickMsg:
 		if !m.busy {
 			return m, nil
@@ -178,7 +214,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishTurn(msg)
 	}
 
-	if m.busy {
+	if m.busy || m.mode != modeChat {
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -188,6 +224,25 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.pending {
+		if msg.String() == "ctrl+c" {
+			return m.quit()
+		}
+		return m, nil
+	}
+	switch m.mode {
+	case modeModels:
+		return m.onPickerKey(msg)
+	case modeConnect:
+		return m.onConnectKey(msg)
+	case modeChat:
+		return m.onChatKey(msg)
+	default:
+		panic(fmt.Sprintf("unhandled input mode %d", m.mode))
+	}
+}
+
+func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		if m.busy {
@@ -227,9 +282,33 @@ func (m *model) submit() tea.Cmd {
 	if text == "" {
 		return nil
 	}
-	if text == "exit" || text == "quit" {
+	parsed := command.Parse(text)
+	switch parsed.Kind {
+	case command.KindQuit:
 		_, cmd := m.quit()
 		return cmd
+	case command.KindModels:
+		m.input.Reset()
+		if parsed.Arg == "" {
+			return m.openPicker()
+		}
+		return m.selectModel(parsed.Arg, false)
+	case command.KindConnect:
+		m.input.Reset()
+		return m.beginConnect(parsed.Arg)
+	case command.KindError:
+		m.input.Reset()
+		m.addBlock(block{kind: blockError, text: parsed.Err.Error()})
+		return nil
+	case command.KindChat:
+	default:
+		panic(fmt.Sprintf("unhandled command kind %d", parsed.Kind))
+	}
+
+	if m.session == nil {
+		m.input.Reset()
+		m.addBlock(block{kind: blockError, text: "select a model with /models"})
+		return nil
 	}
 
 	m.input.Reset()
@@ -440,9 +519,13 @@ func (m *model) layout() {
 		height = 24
 	}
 	m.input.SetWidth(width)
-	inputH := lipgloss.Height(m.input.View())
+	inputH := lipgloss.Height(m.inputView())
+	overlayH := 0
+	if extra := m.overlayView(); extra != "" {
+		overlayH = lipgloss.Height(extra)
+	}
 	const chrome = 3 // header, status, help
-	vpH := height - chrome - inputH
+	vpH := height - chrome - inputH - overlayH
 	if vpH < 1 {
 		vpH = 1
 	}
@@ -475,14 +558,12 @@ func (m *model) View() tea.View {
 		return v
 	}
 
-	body := lipgloss.JoinVertical(
-		lipgloss.Left,
-		m.headerLine(),
-		m.viewport.View(),
-		m.input.View(),
-		m.statusLine(),
-		m.helpLine(),
-	)
+	parts := []string{m.headerLine(), m.viewport.View()}
+	if extra := m.overlayView(); extra != "" {
+		parts = append(parts, extra)
+	}
+	parts = append(parts, m.inputView(), m.statusLine(), m.helpLine())
+	body := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	v := tea.NewView(body)
 	v.WindowTitle = "co"
 	v.ProgramStatus = m.programStatus()
@@ -522,8 +603,21 @@ func waitEvent(ch <-chan tea.Msg) tea.Cmd {
 }
 
 // Run starts the interactive UI. Inline mode is Bubble Tea's default.
-func Run(ctx context.Context, session *agent.Session, modelName, cwd string) error {
+// When no model is selected yet, the model picker is open and esc quits.
+func Run(ctx context.Context, app Director, cwd string) error {
+	modelName := ""
+	var session *agent.Session
+	if app != nil && app.Ready() {
+		modelName = app.Model()
+		session = app.Session()
+	}
 	m := newModel(ctx, session, modelName, cwd)
+	m.director = app
+	if app == nil || !app.Ready() {
+		m.mode = modeModels
+		m.startup = true
+		m.layout()
+	}
 	final, err := tea.NewProgram(
 		m,
 		tea.WithContext(ctx),

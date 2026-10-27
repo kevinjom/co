@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"co/internal/ollama"
+	"co/internal/openai"
 )
 
 func TestRecordShape(t *testing.T) {
@@ -24,8 +24,8 @@ func TestRecordShape(t *testing.T) {
 		t.Fatalf("file created before Record: %v", err)
 	}
 
-	user := ollama.Message{Role: "user", Content: "hi"}
-	assistant := ollama.Message{Role: "assistant", Content: "partial"}
+	user := openai.Message{Role: "user", Content: "hi"}
+	assistant := openai.Message{Role: "assistant", Content: "partial"}
 	if err := w.Record(user, false); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestRecordShape(t *testing.T) {
 			Seq         int            `json:"seq"`
 			TS          string         `json:"ts"`
 			Interrupted bool           `json:"interrupted"`
-			Message     ollama.Message `json:"message"`
+			Message     openai.Message `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			t.Fatal(err)
@@ -102,7 +102,7 @@ func TestRecordShape(t *testing.T) {
 
 	var first struct {
 		Interrupted bool           `json:"interrupted"`
-		Message     ollama.Message `json:"message"`
+		Message     openai.Message `json:"message"`
 	}
 	if err := json.Unmarshal([]byte(lines[1]), &first); err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func TestRecordShape(t *testing.T) {
 	}
 	var second struct {
 		Interrupted bool           `json:"interrupted"`
-		Message     ollama.Message `json:"message"`
+		Message     openai.Message `json:"message"`
 	}
 	if err := json.Unmarshal([]byte(lines[2]), &second); err != nil {
 		t.Fatal(err)
@@ -182,9 +182,53 @@ func TestRecordFailsWhenParentIsAFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = w.Record(ollama.Message{Role: "user", Content: "hi"}, false)
+	err = w.Record(openai.Message{Role: "user", Content: "hi"}, false)
 	if err == nil {
 		t.Fatal("expected an error")
+	}
+}
+
+func TestRecordModelLeavesHeader(t *testing.T) {
+	home := t.TempDir()
+	w, err := Open(home, t.TempDir(), "ollama/first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(openai.Message{Role: "user", Content: "hi"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.RecordModel("openrouter/qwen/qwen3-coder"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := readLines(t, w.path)
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d", len(lines))
+	}
+	var header struct {
+		Type  string `json:"type"`
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
+		t.Fatal(err)
+	}
+	if header.Type != "session" || header.Model != "ollama/first" {
+		t.Fatalf("header %+v", header)
+	}
+	var change struct {
+		Type  string `json:"type"`
+		V     int    `json:"v"`
+		Seq   int    `json:"seq"`
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal([]byte(lines[2]), &change); err != nil {
+		t.Fatal(err)
+	}
+	if change.Type != "model" || change.V != 1 || change.Seq != 2 || change.Model != "openrouter/qwen/qwen3-coder" {
+		t.Fatalf("change %+v", change)
 	}
 }
 

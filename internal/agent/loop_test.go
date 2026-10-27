@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"co/internal/ollama"
+	"co/internal/openai"
 )
 
 func writeSSE(w http.ResponseWriter, chunks ...string) {
@@ -106,7 +106,7 @@ func TestTurnRunsToolThenAnswers(t *testing.T) {
 	}))
 	defer server.Close()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), nil)
 	var events []Event
 	got, err := session.Turn(t.Context(), "what is here?", func(ev Event) {
 		events = append(events, ev)
@@ -192,7 +192,7 @@ func TestTurnDropsToolsAfterCap(t *testing.T) {
 	}))
 	defer server.Close()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), nil)
 	got, err := session.Turn(t.Context(), "keep going", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -222,7 +222,7 @@ func TestTurnKeepsUserMessageOnModelError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), nil)
 	_, err := session.Turn(t.Context(), "hello", nil)
 	if err == nil {
 		t.Fatal("expected an error")
@@ -252,7 +252,7 @@ func TestTurnKeepsPartialAnswerOnCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), nil)
 	got, err := session.Turn(ctx, "hello", func(ev Event) {
 		if _, ok := ev.(AnswerDelta); ok {
 			cancel()
@@ -286,7 +286,7 @@ func TestTurnReportsToolFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), nil)
 	var done ToolDone
 	got, err := session.Turn(t.Context(), "read it", func(ev Event) {
 		if event, ok := ev.(ToolDone); ok {
@@ -309,13 +309,13 @@ func TestTurnReportsToolFailure(t *testing.T) {
 }
 
 type memRecorder struct {
-	msgs        []ollama.Message
+	msgs        []openai.Message
 	interrupted []bool
 	fail        error
 	calls       int
 }
 
-func (m *memRecorder) Record(msg ollama.Message, interrupted bool) error {
+func (m *memRecorder) Record(msg openai.Message, interrupted bool) error {
 	m.calls++
 	if m.fail != nil {
 		return m.fail
@@ -342,7 +342,7 @@ func TestTurnRecordsCompletedMessages(t *testing.T) {
 	defer server.Close()
 
 	rec := &memRecorder{}
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), rec)
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), rec)
 	if _, err := session.Turn(t.Context(), "what is here?", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestTurnDisablesHistoryAfterWriteError(t *testing.T) {
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), rec)
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), rec)
 	got, err := session.Turn(t.Context(), "hello", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -410,7 +410,7 @@ func TestTurnRecordsInterruptedPartial(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	rec := &memRecorder{}
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), rec)
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), rec)
 	_, err := session.Turn(ctx, "hello", func(ev Event) {
 		if _, ok := ev.(AnswerDelta); ok {
 			cancel()
@@ -438,7 +438,7 @@ func TestTurnStreamsReasoningSeparatelyFromAnswer(t *testing.T) {
 	defer server.Close()
 
 	var got []string
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), nil)
 	answer, err := session.Turn(t.Context(), "hi", func(ev Event) {
 		switch ev := ev.(type) {
 		case ReasoningDelta:
@@ -467,7 +467,7 @@ func TestTurnKeepsReasoningWhenTheAnswerIsEmpty(t *testing.T) {
 	}))
 	defer server.Close()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), nil)
 	answer, err := session.Turn(t.Context(), "explain", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -500,9 +500,59 @@ func TestTurnStopsWhenContextIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), nil)
 	_, err := session.Turn(ctx, "hello", nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+type scriptChat struct {
+	model string
+	seen  [][]openai.Message
+}
+
+func (s *scriptChat) ChatStream(
+	_ context.Context,
+	model string,
+	messages []openai.Message,
+	_ []openai.Tool,
+	onChunk func(openai.StreamKind, string),
+) (openai.Message, error) {
+	s.model = model
+	copied := append([]openai.Message{}, messages...)
+	s.seen = append(s.seen, copied)
+	if onChunk != nil {
+		onChunk(openai.StreamContent, "ok")
+	}
+	return openai.Message{Role: "assistant", Content: "ok"}, nil
+}
+
+func TestSetModelKeepsMessages(t *testing.T) {
+	first := &scriptChat{}
+	session := NewSession(first, "one", t.TempDir(), nil)
+	if _, err := session.Turn(t.Context(), "hello", nil); err != nil {
+		t.Fatal(err)
+	}
+	second := &scriptChat{}
+	session.SetModel(second, "two")
+	if _, err := session.Turn(t.Context(), "next", nil); err != nil {
+		t.Fatal(err)
+	}
+	if first.model != "one" || second.model != "two" {
+		t.Fatalf("models %q %q", first.model, second.model)
+	}
+	if len(second.seen) != 1 || len(second.seen[0]) != 4 {
+		t.Fatalf("follow-up history %+v", second.seen)
+	}
+	roles := make([]string, len(second.seen[0]))
+	for i, msg := range second.seen[0] {
+		roles[i] = msg.Role
+	}
+	if strings.Join(roles, ",") != "system,user,assistant,user" {
+		t.Fatalf("roles %v", roles)
+	}
+	if second.seen[0][1].Content != "hello" || second.seen[0][3].Content != "next" {
+		t.Fatalf("messages %+v", second.seen[0])
 	}
 }

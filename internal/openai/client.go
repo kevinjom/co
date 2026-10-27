@@ -1,4 +1,4 @@
-package ollama
+package openai
 
 import (
 	"bytes"
@@ -16,16 +16,37 @@ const maxResponseBytes = 8 << 20
 // defaultReasoningEffort is sent as reasoning_effort on every chat request.
 const defaultReasoningEffort = "low"
 
-// Client talks to one Ollama daemon through its OpenAI-compatible API.
+// Compat selects optional OpenAI-compatible fields.
+// Ollama sends reasoning_effort and reads the reasoning delta.
+// Other providers leave both off unless configured.
+type Compat struct {
+	ReasoningEffort bool
+	ReasoningDelta  bool
+}
+
+// Client talks to one OpenAI-compatible chat endpoint.
 type Client struct {
 	baseURL string
+	apiKey  string
+	compat  Compat
 	http    *http.Client
 }
 
-// New returns a client for baseURL. A trailing slash is ignored.
+// New returns a client for an Ollama daemon. A trailing slash is ignored.
+// Reasoning effort and the reasoning delta are enabled.
 func New(baseURL string) *Client {
+	return NewEndpoint(baseURL, "", Compat{
+		ReasoningEffort: true,
+		ReasoningDelta:  true,
+	})
+}
+
+// NewEndpoint returns a client for one provider endpoint.
+func NewEndpoint(baseURL, apiKey string, compat Compat) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		apiKey:  apiKey,
+		compat:  compat,
 		http:    &http.Client{},
 	}
 }
@@ -56,6 +77,31 @@ func (c *Client) Show(ctx context.Context, model string) error {
 		return fmt.Errorf("model %q: %w", model, err)
 	}
 	return nil
+}
+
+type modelList struct {
+	Data []struct {
+		ID string `json:"id"`
+	} `json:"data"`
+}
+
+// List returns model ids from GET /v1/models.
+func (c *Client) List(ctx context.Context) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var dest modelList
+	if err := c.do(ctx, http.MethodGet, "/v1/models", nil, &dest); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(dest.Data))
+	for _, item := range dest.Data {
+		if item.ID == "" {
+			continue
+		}
+		ids = append(ids, item.ID)
+	}
+	return ids, nil
 }
 
 func (m apiMessage) message() Message {
@@ -108,6 +154,16 @@ func (c *Client) do(ctx context.Context, method, path string, payload any, dest 
 	return nil
 }
 
+// chatCompletionsPath is /v1/chat/completions on a server root such as an Ollama host.
+// A base that already ends in /v1 or /openai, including OpenRouter and Gemini's
+// OpenAI-compatible endpoint, only needs /chat/completions.
+func chatCompletionsPath(baseURL string) string {
+	if strings.HasSuffix(baseURL, "/v1") || strings.HasSuffix(baseURL, "/openai") {
+		return "/chat/completions"
+	}
+	return "/v1/chat/completions"
+}
+
 // send performs one request. A non-200 response is an error and the body is closed.
 // On success the caller closes the body.
 func (c *Client) send(ctx context.Context, method, path string, payload any) (*http.Response, error) {
@@ -126,6 +182,9 @@ func (c *Client) send(ctx context.Context, method, path string, payload any) (*h
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
 	resp, err := c.http.Do(req)

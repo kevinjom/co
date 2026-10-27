@@ -61,7 +61,11 @@ func styleInput(ta *textarea.Model, th theme) {
 }
 
 func (m *model) headerLine() string {
-	left := m.theme.accent.Render("co") + m.theme.dim.Render("  "+m.modelName)
+	label := m.modelName
+	if label == "" {
+		label = "no model"
+	}
+	left := m.theme.accent.Render("co") + m.theme.dim.Render("  "+label)
 	right := m.theme.dim.Render(shortPath(m.cwd))
 	return joinSides(m.usableWidth(), left, right)
 }
@@ -75,6 +79,10 @@ func (m *model) statusLine() string {
 			label = "thinking"
 		}
 		left = m.spin.View() + label
+	case m.mode == modeModels:
+		left = m.theme.dim.Render("choose a model")
+	case m.mode == modeConnect:
+		left = m.theme.dim.Render("api key")
 	case !m.viewport.AtBottom():
 		left = m.theme.dim.Render("pgdn to follow")
 	default:
@@ -86,8 +94,15 @@ func (m *model) statusLine() string {
 
 func (m *model) helpLine() string {
 	text := "enter send  ·  ctrl+j newline  ·  pgup/pgdn scroll  ·  ctrl+c quit"
-	if m.busy {
+	switch {
+	case m.busy:
 		text = "ctrl+c stop  ·  pgup/pgdn scroll"
+	case m.mode == modeModels && m.session == nil:
+		text = "enter select  ·  esc quit  ·  up/down move"
+	case m.mode == modeModels:
+		text = "enter select  ·  esc close  ·  up/down move"
+	case m.mode == modeConnect:
+		text = "enter save  ·  esc cancel"
 	}
 	width := m.usableWidth()
 	if width > 0 && lipgloss.Width(text) > width {

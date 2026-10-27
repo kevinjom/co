@@ -1,4 +1,4 @@
-// Package agent runs one read-only tool loop against an Ollama model.
+// Package agent runs one read-only tool loop against a chat model.
 package agent
 
 import (
@@ -8,14 +8,27 @@ import (
 	"log/slog"
 	"strings"
 
-	"co/internal/ollama"
+	"co/internal/openai"
 	"co/internal/tools"
 )
 
 // Recorder stores completed messages. A nil recorder leaves history off.
 type Recorder interface {
-	Record(msg ollama.Message, interrupted bool) error
+	Record(msg openai.Message, interrupted bool) error
 }
+
+// Chatter is one OpenAI-compatible chat endpoint.
+type Chatter interface {
+	ChatStream(
+		ctx context.Context,
+		model string,
+		messages []openai.Message,
+		tools []openai.Tool,
+		onChunk func(openai.StreamKind, string),
+	) (openai.Message, error)
+}
+
+var _ Chatter = (*openai.Client)(nil)
 
 // maxToolRounds is how many model calls may include tools.
 // If the model is still calling tools after that, one more call is made with no tools.
@@ -23,17 +36,17 @@ const maxToolRounds = 8
 
 // Session is the in-memory conversation for one process.
 type Session struct {
-	client   *ollama.Client
+	client   Chatter
 	model    string
 	tools    *tools.Set
-	defs     []ollama.Tool
-	messages []ollama.Message
+	defs     []openai.Tool
+	messages []openai.Message
 	recorder Recorder
 }
 
 // NewSession starts a conversation rooted at cwd.
 // A nil recorder does not write history.
-func NewSession(client *ollama.Client, model, cwd string, recorder Recorder) *Session {
+func NewSession(client Chatter, model, cwd string, recorder Recorder) *Session {
 	set := tools.New(cwd)
 	return &Session{
 		client:   client,
@@ -41,17 +54,29 @@ func NewSession(client *ollama.Client, model, cwd string, recorder Recorder) *Se
 		tools:    set,
 		defs:     toolDefinitions(set),
 		recorder: recorder,
-		messages: []ollama.Message{
+		messages: []openai.Message{
 			{Role: "system", Content: systemPrompt(cwd)},
 		},
 	}
+}
+
+// SetModel points later turns at a different endpoint and wire model id.
+// The message list is left as it is.
+func (s *Session) SetModel(client Chatter, model string) {
+	s.client = client
+	s.model = model
+}
+
+// DropRecorder turns history off for the rest of the process.
+func (s *Session) DropRecorder() {
+	s.recorder = nil
 }
 
 // Turn appends the user line and runs tools until the model answers.
 // On a model error the user line stays in the session.
 // When the turn is canceled after some text has arrived, that partial answer is kept too.
 func (s *Session) Turn(ctx context.Context, userText string, observe Observer) (string, error) {
-	s.remember(ollama.Message{Role: "user", Content: userText}, false)
+	s.remember(openai.Message{Role: "user", Content: userText}, false)
 
 	for range maxToolRounds {
 		msg, err := s.complete(ctx, s.defs, observe)
@@ -73,13 +98,13 @@ func (s *Session) Turn(ctx context.Context, userText string, observe Observer) (
 	return msg.Content, nil
 }
 
-func (s *Session) complete(ctx context.Context, defs []ollama.Tool, observe Observer) (ollama.Message, error) {
+func (s *Session) complete(ctx context.Context, defs []openai.Tool, observe Observer) (openai.Message, error) {
 	var reasoning strings.Builder
-	msg, err := s.client.ChatStream(ctx, s.model, s.messages, defs, func(kind ollama.StreamKind, text string) {
+	msg, err := s.client.ChatStream(ctx, s.model, s.messages, defs, func(kind openai.StreamKind, text string) {
 		switch kind {
-		case ollama.StreamContent:
+		case openai.StreamContent:
 			emit(observe, AnswerDelta{Text: text})
-		case ollama.StreamReasoning:
+		case openai.StreamReasoning:
 			reasoning.WriteString(text)
 			emit(observe, ReasoningDelta{Text: text})
 		default:
@@ -91,7 +116,7 @@ func (s *Session) complete(ctx context.Context, defs []ollama.Tool, observe Obse
 }
 
 // answerText keeps a reasoning-only reply. A tool call stays content-free.
-func answerText(msg ollama.Message, reasoning string) string {
+func answerText(msg openai.Message, reasoning string) string {
 	if strings.TrimSpace(msg.Content) != "" || len(msg.ToolCalls) > 0 {
 		return msg.Content
 	}
@@ -100,7 +125,7 @@ func answerText(msg ollama.Message, reasoning string) string {
 
 // keepPartial stores a canceled answer so the next turn can see what the user already saw.
 // Any other error leaves the session unchanged apart from the user line.
-func (s *Session) keepPartial(msg ollama.Message, err error) (string, error) {
+func (s *Session) keepPartial(msg openai.Message, err error) (string, error) {
 	stopped := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 	if !stopped || msg.Content == "" {
 		return "", err
@@ -115,7 +140,7 @@ func (s *Session) keepPartial(msg ollama.Message, err error) (string, error) {
 
 // remember keeps a finished message in the session and, when history is on, in the transcript.
 // A write failure disables history for the rest of the process. The turn itself still succeeds.
-func (s *Session) remember(msg ollama.Message, interrupted bool) {
+func (s *Session) remember(msg openai.Message, interrupted bool) {
 	s.messages = append(s.messages, msg)
 	if s.recorder == nil {
 		return
@@ -126,7 +151,7 @@ func (s *Session) remember(msg ollama.Message, interrupted bool) {
 	}
 }
 
-func (s *Session) runTools(ctx context.Context, calls []ollama.ToolCall, observe Observer) {
+func (s *Session) runTools(ctx context.Context, calls []openai.ToolCall, observe Observer) {
 	for _, call := range calls {
 		emit(observe, ToolStart{
 			ID:     call.ID,
@@ -135,7 +160,7 @@ func (s *Session) runTools(ctx context.Context, calls []ollama.ToolCall, observe
 		})
 		result, toolErr := s.tools.Run(ctx, call.Function.Name, map[string]any(call.Function.Arguments))
 		emit(observe, ToolDone{ID: call.ID, Err: toolErr})
-		s.remember(ollama.Message{
+		s.remember(openai.Message{
 			Role:       "tool",
 			Content:    result,
 			ToolCallID: call.ID,
@@ -155,13 +180,13 @@ func systemPrompt(cwd string) string {
 	return strings.Join(lines, "\n")
 }
 
-func toolDefinitions(set *tools.Set) []ollama.Tool {
+func toolDefinitions(set *tools.Set) []openai.Tool {
 	schemas := set.Schemas()
-	defs := make([]ollama.Tool, 0, len(schemas))
+	defs := make([]openai.Tool, 0, len(schemas))
 	for _, schema := range schemas {
-		defs = append(defs, ollama.Tool{
+		defs = append(defs, openai.Tool{
 			Type: "function",
-			Function: ollama.ToolSpec{
+			Function: openai.ToolSpec{
 				Name:        schema.Name,
 				Description: schema.Description,
 				Parameters:  schema.Parameters,
@@ -171,10 +196,10 @@ func toolDefinitions(set *tools.Set) []ollama.Tool {
 	return defs
 }
 
-func toolDetail(call ollama.ToolCall) string {
+func toolDetail(call openai.ToolCall) string {
 	args := call.Function.Arguments
 	if args == nil {
-		args = ollama.Arguments{}
+		args = openai.Arguments{}
 	}
 
 	switch call.Function.Name {

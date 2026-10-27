@@ -174,7 +174,7 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 		"--host",
 		server.URL,
 		"--model",
-		"test-model",
+		"ollama/test-model",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -218,7 +218,7 @@ func TestNoHistoryWritesNothing(t *testing.T) {
 		"--host",
 		server.URL,
 		"--model",
-		"test-model",
+		"ollama/test-model",
 		"--no-history",
 	)
 	if err != nil {
@@ -237,6 +237,155 @@ func TestNoHistoryWritesNothing(t *testing.T) {
 	}
 	if len(matches) != 0 {
 		t.Fatalf("session files %v", matches)
+	}
+}
+
+func TestBareModelIsUsageError(t *testing.T) {
+	prepare(t)
+	_, _, err := startCLI(t, "", "--model", "test-model")
+	var exitErr *exitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSlashModelsIsNotATurn(t *testing.T) {
+	var mu sync.Mutex
+	var chats int
+	var chatModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"test-model"}]}`)
+		case r.URL.Path == "/v1/models/test-model":
+			_, _ = io.WriteString(w, `{"id":"test-model"}`)
+		case r.URL.Path == "/v1/models/missing":
+			http.NotFound(w, r)
+		case r.URL.Path == "/v1/chat/completions":
+			var payload struct {
+				Model string `json:"model"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Errorf("decode: %v", err)
+				return
+			}
+			mu.Lock()
+			chats++
+			chatModel = payload.Model
+			mu.Unlock()
+			writeSSE(w, contentChunk("ok"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	prepare(t)
+	stdout, stderr, err := startCLI(
+		t,
+		"/models\n/nope\n/models ollama/missing\nhi\n",
+		"--host",
+		server.URL,
+		"--model",
+		"ollama/test-model",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != "ok\n" {
+		t.Fatalf("stdout %q", stdout)
+	}
+	if !strings.Contains(stderr, "ollama/test-model") || !strings.Contains(stderr, "unknown command") {
+		t.Fatalf("stderr %q", stderr)
+	}
+	if !strings.Contains(stderr, "missing") {
+		t.Fatalf("stderr %q", stderr)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if chats != 1 || chatModel != "test-model" {
+		t.Fatalf("chats=%d model=%q", chats, chatModel)
+	}
+}
+
+func TestSlashModelsSwitchesAndPersists(t *testing.T) {
+	var mu sync.Mutex
+	var chatModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/models/test-model" || r.URL.Path == "/v1/models/other":
+			_, _ = io.WriteString(w, `{"id":"ok"}`)
+		case r.URL.Path == "/v1/chat/completions":
+			var payload struct {
+				Model string `json:"model"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Errorf("decode: %v", err)
+				return
+			}
+			mu.Lock()
+			chatModel = payload.Model
+			mu.Unlock()
+			writeSSE(w, contentChunk("ok"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	prepare(t)
+	stdout, stderr, err := startCLI(
+		t,
+		"/models ollama/other\nhi\n",
+		"--host",
+		server.URL,
+		"--model",
+		"ollama/test-model",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != "ok\n" {
+		t.Fatalf("stdout %q", stdout)
+	}
+	if !strings.Contains(stderr, "model ollama/other") {
+		t.Fatalf("stderr %q", stderr)
+	}
+	mu.Lock()
+	if chatModel != "other" {
+		t.Fatalf("chat model %q", chatModel)
+	}
+	mu.Unlock()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".co.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "ollama/other") {
+		t.Fatalf("config %s", data)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(home, ".co", "projects", "*", "sessions", "*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("session files %v", matches)
+	}
+	session, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(session)
+	if !strings.Contains(text, `"type":"session"`) || !strings.Contains(text, `"model":"ollama/test-model"`) {
+		t.Fatalf("header missing startup model: %s", text)
+	}
+	if !strings.Contains(text, `"type":"model"`) || !strings.Contains(text, `"model":"ollama/other"`) {
+		t.Fatalf("model record missing: %s", text)
 	}
 }
 

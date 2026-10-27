@@ -1,5 +1,5 @@
-// Package ollama is a small client for Ollama's OpenAI-compatible chat API.
-package ollama
+// Package openai is a client for the OpenAI chat-completions API.
+package openai
 
 import (
 	"encoding/json"
@@ -16,9 +16,35 @@ type Message struct {
 
 // ToolCall is a function the model wants the harness to run.
 type ToolCall struct {
-	ID       string       `json:"id,omitempty"`
-	Type     string       `json:"type,omitempty"`
-	Function FunctionCall `json:"function"`
+	ID           string        `json:"id,omitempty"`
+	Type         string        `json:"type,omitempty"`
+	Function     FunctionCall  `json:"function"`
+	ExtraContent *ExtraContent `json:"extra_content,omitempty"`
+}
+
+// ExtraContent holds provider fields that must be sent back unchanged.
+// Gemini requires the thought signature on the tool call that carried it.
+type ExtraContent struct {
+	Google *GoogleExtra `json:"google,omitempty"`
+}
+
+// GoogleExtra is Gemini's addition to an OpenAI tool call.
+type GoogleExtra struct {
+	ThoughtSignature string `json:"thought_signature,omitempty"`
+}
+
+func thoughtSignature(extra *ExtraContent) string {
+	if extra == nil || extra.Google == nil {
+		return ""
+	}
+	return extra.Google.ThoughtSignature
+}
+
+func withThoughtSignature(signature string) *ExtraContent {
+	if signature == "" {
+		return nil
+	}
+	return &ExtraContent{Google: &GoogleExtra{ThoughtSignature: signature}}
 }
 
 // FunctionCall is the name and arguments of one tool call.

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"co/internal/ollama"
+	"co/internal/openai"
 )
 
 const version = 1
@@ -44,7 +44,15 @@ type messageRecord struct {
 	Seq         int            `json:"seq"`
 	TS          string         `json:"ts"`
 	Interrupted bool           `json:"interrupted"`
-	Message     ollama.Message `json:"message"`
+	Message     openai.Message `json:"message"`
+}
+
+type modelRecord struct {
+	Type  string `json:"type"`
+	V     int    `json:"v"`
+	Seq   int    `json:"seq"`
+	TS    string `json:"ts"`
+	Model string `json:"model"`
 }
 
 // Open prepares a session file under home/.co/projects/<project>/sessions.
@@ -105,7 +113,7 @@ func newSessionID(now time.Time) (string, error) {
 
 // Record appends one completed message.
 // interrupted marks an assistant message cut short by cancellation.
-func (w *Writer) Record(msg ollama.Message, interrupted bool) error {
+func (w *Writer) Record(msg openai.Message, interrupted bool) error {
 	if err := w.ensure(); err != nil {
 		return err
 	}
@@ -122,6 +130,23 @@ func (w *Writer) Record(msg ollama.Message, interrupted bool) error {
 		return err
 	}
 	return nil
+}
+
+// RecordModel appends one model-change line.
+// The session header keeps the model from Open and is not rewritten.
+func (w *Writer) RecordModel(model string) error {
+	if err := w.ensure(); err != nil {
+		return err
+	}
+	w.seq++
+	rec := modelRecord{
+		Type:  "model",
+		V:     version,
+		Seq:   w.seq,
+		TS:    time.Now().UTC().Format(time.RFC3339Nano),
+		Model: model,
+	}
+	return w.writeLine(rec)
 }
 
 func (w *Writer) ensure() error {

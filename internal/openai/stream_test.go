@@ -1,4 +1,4 @@
-package ollama
+package openai
 
 import (
 	"context"
@@ -288,5 +288,173 @@ func TestChatStreamEmptyBody(t *testing.T) {
 	_, err := New(server.URL).ChatStream(t.Context(), "m", nil, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "empty stream") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEndpointSendsKeyAndSkipsReasoning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			t.Errorf("authorization %q", r.Header.Get("Authorization"))
+		}
+		var payload struct {
+			ReasoningEffort string `json:"reasoning_effort"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode: %v", err)
+			return
+		}
+		if payload.ReasoningEffort != "" {
+			t.Errorf("reasoning_effort %q", payload.ReasoningEffort)
+		}
+		writeSSE(w, chunkWith("reasoning", "hidden"), chunkWith("content", "hi"))
+	}))
+	defer server.Close()
+
+	var sawReasoning bool
+	msg, err := NewEndpoint(server.URL, "secret", Compat{}).ChatStream(
+		t.Context(),
+		"m",
+		nil,
+		nil,
+		func(kind StreamKind, _ string) {
+			if kind == StreamReasoning {
+				sawReasoning = true
+			}
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sawReasoning || msg.Content != "hi" {
+		t.Fatalf("reasoning %v content %q", sawReasoning, msg.Content)
+	}
+}
+
+func TestChatPathFollowsBase(t *testing.T) {
+	var got string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Path
+		writeSSE(w, contentChunk("ok"))
+	}))
+	defer server.Close()
+
+	base := server.URL + "/v1beta/openai"
+	if _, err := NewEndpoint(base, "secret", Compat{}).ChatStream(t.Context(), "gemini-flash-latest", nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got != "/v1beta/openai/chat/completions" {
+		t.Fatalf("path %q", got)
+	}
+}
+
+func signatureChunk(index int, signature string) string {
+	payload, err := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{"delta": map[string]any{
+			"tool_calls": []any{map[string]any{
+				"index": index,
+				"extra_content": map[string]any{
+					"google": map[string]any{"thought_signature": signature},
+				},
+			}},
+		}}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(payload)
+}
+
+func TestChatStreamReplaysThoughtSignature(t *testing.T) {
+	var replay struct {
+		Messages []struct {
+			Role      string `json:"role"`
+			ToolCalls []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+				ExtraContent *ExtraContent `json:"extra_content"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	var turn int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		turn++
+		if turn == 1 {
+			first := 0
+			second := 1
+			writeSSE(w,
+				toolChunk(&first, "call_1", "list_dir", `{"path":"."}`),
+				signatureChunk(0, "sig-a"),
+				toolChunk(&second, "call_2", "grep", `{"pattern":"x"}`),
+			)
+			return
+		}
+		if err := json.Unmarshal(body, &replay); err != nil {
+			t.Errorf("decode replay: %v", err)
+		}
+		writeSSE(w, contentChunk("ok"))
+	}))
+	defer server.Close()
+
+	client := NewEndpoint(server.URL, "secret", Compat{})
+	msg, err := client.ChatStream(t.Context(), "gemini-flash-latest", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.ToolCalls) != 2 {
+		t.Fatalf("calls %+v", msg.ToolCalls)
+	}
+	if thoughtSignature(msg.ToolCalls[0].ExtraContent) != "sig-a" {
+		t.Fatalf("first signature %q", thoughtSignature(msg.ToolCalls[0].ExtraContent))
+	}
+	if msg.ToolCalls[1].ExtraContent != nil {
+		t.Fatalf("second call carried %+v", msg.ToolCalls[1].ExtraContent)
+	}
+
+	_, err = client.ChatStream(t.Context(), "gemini-flash-latest", []Message{
+		{Role: "user", Content: "look"},
+		msg,
+		{Role: "tool", Content: "files", ToolCallID: "call_1"},
+		{Role: "tool", Content: "hits", ToolCallID: "call_2"},
+	}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(replay.Messages) != 4 || replay.Messages[1].Role != "assistant" {
+		t.Fatalf("replay %+v", replay.Messages)
+	}
+	calls := replay.Messages[1].ToolCalls
+	if len(calls) != 2 || calls[0].Function.Name != "list_dir" || calls[1].Function.Name != "grep" {
+		t.Fatalf("replayed calls %+v", calls)
+	}
+	if thoughtSignature(calls[0].ExtraContent) != "sig-a" {
+		t.Fatalf("replayed signature %q", thoughtSignature(calls[0].ExtraContent))
+	}
+	if calls[1].ExtraContent != nil {
+		t.Fatalf("second replay carried %+v", calls[1].ExtraContent)
+	}
+}
+
+func TestListModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" || r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":[{"id":"a"},{"id":""},{"id":"b/c"}]}`)
+	}))
+	defer server.Close()
+
+	ids, err := New(server.URL).List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(ids, ",") != "a,b/c" {
+		t.Fatalf("ids %v", ids)
 	}
 }

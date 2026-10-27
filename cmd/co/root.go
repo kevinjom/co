@@ -7,9 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"co/internal/agent"
-	"co/internal/ollama"
-	"co/internal/transcript"
+	"co/internal/command"
+	"co/internal/provider"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -34,7 +33,7 @@ func newRootCmd() (*cobra.Command, error) {
 	cmd.PersistentFlags().String("config", "", "config file (default $HOME/.co.yaml)")
 	cmd.PersistentFlags().String("log-level", "info", "log level (debug, info, warn, error)")
 	cmd.Flags().String("host", defaultHost, "Ollama host")
-	cmd.Flags().String("model", "", "Ollama model name")
+	cmd.Flags().String("model", "", "model as provider/model-id")
 	cmd.Flags().Bool("no-history", false, "do not save the session transcript")
 
 	if err := bindFlag(cmd.PersistentFlags(), "config"); err != nil {
@@ -92,7 +91,7 @@ func initConfig(cmd *cobra.Command) error {
 	if err := viper.BindEnv("host", "CO_HOST", "OLLAMA_HOST"); err != nil {
 		return fmt.Errorf("binding host: %w", err)
 	}
-	if err := viper.BindEnv("model", "CO_MODEL", "OLLAMA_MODEL"); err != nil {
+	if err := viper.BindEnv("model", "CO_MODEL"); err != nil {
 		return fmt.Errorf("binding model: %w", err)
 	}
 	if err := viper.BindEnv("log-level", "CO_LOG_LEVEL"); err != nil {
@@ -136,54 +135,67 @@ func parseLogLevel(raw string) (slog.Level, error) {
 }
 
 func run(cmd *cobra.Command, _ []string) error {
-	host := viper.GetString("host")
-	model := viper.GetString("model")
-	if model == "" {
-		return usageError(fmt.Errorf("model is required: set --model or OLLAMA_MODEL"))
+	hostSet := cmd.Flags().Changed("host") || os.Getenv("CO_HOST") != "" || os.Getenv("OLLAMA_HOST") != ""
+	host := ""
+	if hostSet {
+		host = viper.GetString("host")
+		if strings.TrimSpace(host) == "" {
+			return usageError(fmt.Errorf("host is required: set --host or OLLAMA_HOST"))
+		}
 	}
-	if host == "" {
-		return usageError(fmt.Errorf("host is required: set --host or OLLAMA_HOST"))
+
+	flagModel := ""
+	if cmd.Flags().Changed("model") {
+		flagModel = viper.GetString("model")
+	} else if os.Getenv("CO_MODEL") != "" {
+		flagModel = os.Getenv("CO_MODEL")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("finding home directory: %w", err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("working directory: %w", err)
+	}
+	configFile, err := cmd.Flags().GetString("config")
+	if err != nil {
+		return err
+	}
+
+	cat, err := provider.Load(provider.LoadOptions{
+		Home:       home,
+		ProjectDir: cwd,
+		ConfigFile: configFile,
+		FlagModel:  flagModel,
+		Host:       host,
+		HostSet:    hostSet,
+	})
+	if err != nil {
+		return err
 	}
 
 	signals := startSignals(cmd.Context())
 	defer signals.close()
 
-	client := ollama.New(host)
-	if err := client.Show(signals.ctx, model); err != nil {
+	app := command.New(cat, home, cwd, viper.GetBool("no-history"))
+	defer app.Close()
+
+	interactive := isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout())
+	if model := cat.Selected(); model == "" {
+		if !interactive {
+			return usageError(fmt.Errorf("model is required: set --model as provider/model-id, or set model in ~/.co.yaml"))
+		}
+	} else if err := app.Activate(signals.ctx, model); err != nil {
 		if sigErr := signals.err(); sigErr != nil {
 			return sigErr
 		}
-		return fmt.Errorf("checking model %q: %w", model, err)
-	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("working directory: %w", err)
-	}
-	recorder, closeHistory := openHistory(cwd, model)
-	defer closeHistory()
-	session := agent.NewSession(client, model, cwd, recorder)
-	return repl(cmd, signals, session, model, cwd)
-}
-
-func openHistory(cwd, model string) (agent.Recorder, func()) {
-	noop := func() {}
-	if viper.GetBool("no-history") {
-		return nil, noop
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		slog.Warn("session history disabled", "err", err)
-		return nil, noop
-	}
-	history, err := transcript.Open(home, cwd, model)
-	if err != nil {
-		slog.Warn("session history disabled", "err", err)
-		return nil, noop
-	}
-	return history, func() {
-		if err := history.Close(); err != nil {
-			slog.Warn("closing session history", "err", err)
+		var parseErr *provider.ParseError
+		if errors.As(err, &parseErr) {
+			return usageError(err)
 		}
+		return err
 	}
+	return repl(cmd, signals, app, cwd)
 }

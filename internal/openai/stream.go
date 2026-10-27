@@ -1,4 +1,4 @@
-package ollama
+package openai
 
 import (
 	"bufio"
@@ -39,11 +39,13 @@ func (c *Client) ChatStream(
 	}
 
 	payload := chatRequest{
-		Model:           model,
-		Messages:        messages,
-		Tools:           tools,
-		Stream:          true,
-		ReasoningEffort: defaultReasoningEffort,
+		Model:    model,
+		Messages: messages,
+		Tools:    tools,
+		Stream:   true,
+	}
+	if c.compat.ReasoningEffort {
+		payload.ReasoningEffort = defaultReasoningEffort
 	}
 	msg, err := c.stream(ctx, payload, onChunk)
 	if err != nil && ctx.Err() != nil {
@@ -74,17 +76,19 @@ type streamToolCall struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
+	ExtraContent *ExtraContent `json:"extra_content"`
 }
 
 type toolDraft struct {
-	id   string
-	typ  string
-	name string
-	args strings.Builder
+	id        string
+	typ       string
+	name      string
+	signature string
+	args      strings.Builder
 }
 
 func (c *Client) stream(ctx context.Context, payload chatRequest, onChunk func(StreamKind, string)) (Message, error) {
-	resp, err := c.send(ctx, "POST", "/v1/chat/completions", payload)
+	resp, err := c.send(ctx, "POST", chatCompletionsPath(c.baseURL), payload)
 	if err != nil {
 		return Message{}, fmt.Errorf("chat: %w", err)
 	}
@@ -118,7 +122,7 @@ func (c *Client) stream(ctx context.Context, payload chatRequest, onChunk func(S
 		}
 
 		sawChunk = true
-		if err := applyChunk(data, &content, &drafts, onChunk); err != nil {
+		if err := c.applyChunk(data, &content, &drafts, onChunk); err != nil {
 			return fail(fmt.Errorf("chat: %w", err))
 		}
 	}
@@ -142,7 +146,7 @@ func sseData(line string) (string, bool) {
 	return strings.TrimSpace(strings.TrimPrefix(line, "data:")), true
 }
 
-func applyChunk(data string, content *strings.Builder, drafts *[]toolDraft, onChunk func(StreamKind, string)) error {
+func (c *Client) applyChunk(data string, content *strings.Builder, drafts *[]toolDraft, onChunk func(StreamKind, string)) error {
 	var chunk streamChunk
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 		return fmt.Errorf("decoding stream: %w", err)
@@ -157,7 +161,7 @@ func applyChunk(data string, content *strings.Builder, drafts *[]toolDraft, onCh
 			onChunk(StreamContent, *delta.Content)
 		}
 	}
-	if delta.Reasoning != nil && *delta.Reasoning != "" && onChunk != nil {
+	if c.compat.ReasoningDelta && delta.Reasoning != nil && *delta.Reasoning != "" && onChunk != nil {
 		onChunk(StreamReasoning, *delta.Reasoning)
 	}
 	appendToolCalls(drafts, delta.ToolCalls)
@@ -176,6 +180,9 @@ func appendToolCalls(drafts *[]toolDraft, calls []streamToolCall) {
 		}
 		if call.Type != "" {
 			item.typ = call.Type
+		}
+		if signature := thoughtSignature(call.ExtraContent); signature != "" {
+			item.signature = signature
 		}
 		item.name += call.Function.Name
 		item.args.WriteString(call.Function.Arguments)
@@ -215,6 +222,7 @@ func finishStream(content string, drafts []toolDraft) (Message, error) {
 				Name:      draft.name,
 				Arguments: args,
 			},
+			ExtraContent: withThoughtSignature(draft.signature),
 		})
 	}
 	text := content

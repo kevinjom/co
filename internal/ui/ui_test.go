@@ -11,13 +11,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"co/internal/agent"
-	"co/internal/ollama"
+	"co/internal/openai"
 )
 
 func newTestModel(t *testing.T) *model {
 	t.Helper()
 	dir := t.TempDir()
-	session := agent.NewSession(ollama.New("http://127.0.0.1:1"), "test-model", dir, nil)
+	session := agent.NewSession(openai.New("http://127.0.0.1:1"), "test-model", dir, nil)
 	m := newModel(context.Background(), session, "test-model", dir)
 	m.width = 80
 	m.height = 24
@@ -269,5 +269,116 @@ func TestWrapKeepsExistingLines(t *testing.T) {
 	got := wrapText("one\n\ntwo", 80)
 	if got != "one\n\ntwo" {
 		t.Fatalf("%q", got)
+	}
+}
+
+type fakeDirector struct {
+	models  []string
+	picked  string
+	session *agent.Session
+	ready   bool
+}
+
+func (f *fakeDirector) Models(context.Context) ([]string, error) { return f.models, nil }
+func (f *fakeDirector) Select(_ context.Context, ref string) error {
+	f.picked = ref
+	return nil
+}
+func (f *fakeDirector) CanConnect(string) error      { return nil }
+func (f *fakeDirector) Connect(string, string) error { return nil }
+func (f *fakeDirector) Model() string                { return f.picked }
+func (f *fakeDirector) Session() *agent.Session      { return f.session }
+func (f *fakeDirector) Ready() bool                  { return f.ready }
+
+func TestModelsCommandDoesNotStartATurn(t *testing.T) {
+	m := newTestModel(t)
+	director := &fakeDirector{
+		models:  []string{"ollama/a", "ollama/b"},
+		session: m.session,
+		ready:   true,
+	}
+	m.director = director
+	m.input.SetValue("/models")
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if got.busy || got.mode != modeModels || cmd == nil {
+		t.Fatalf("busy=%v mode=%d cmd=%v", got.busy, got.mode, cmd != nil)
+	}
+	loaded := cmd().(modelsLoadedMsg)
+	updated, _ = got.Update(loaded)
+	got = updated.(*model)
+	plain := ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "ollama/a") || !strings.Contains(plain, "ollama/b") {
+		t.Fatalf("picker %q", plain)
+	}
+
+	updated, cmd = got.Update(press(tea.KeyEnter, 0))
+	got = updated.(*model)
+	if cmd == nil || got.busy {
+		t.Fatalf("busy=%v cmd=%v", got.busy, cmd != nil)
+	}
+	done := cmd().(selectDoneMsg)
+	updated, _ = got.Update(done)
+	got = updated.(*model)
+	if director.picked != "ollama/a" || got.mode != modeChat || got.modelName != "ollama/a" {
+		t.Fatalf("picked %q mode %d name %q", director.picked, got.mode, got.modelName)
+	}
+	if got.busy || strings.Contains(ansi.Strip(got.renderTranscript()), "❯ /models") {
+		t.Fatal("command was sent as a chat turn")
+	}
+}
+
+func TestUnknownCommandIsNotATurn(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("/nope")
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if got.busy || cmd != nil {
+		t.Fatalf("busy=%v cmd=%v", got.busy, cmd != nil)
+	}
+	plain := ansi.Strip(got.renderTranscript())
+	if !strings.Contains(plain, "unknown command") {
+		t.Fatalf("transcript %q", plain)
+	}
+}
+
+func TestStartupEscQuits(t *testing.T) {
+	m := newTestModel(t)
+	m.session = nil
+	m.mode = modeModels
+	m.startup = true
+	updated, cmd := m.Update(press(tea.KeyEsc, 0))
+	got := updated.(*model)
+	if !got.quitting || cmd == nil {
+		t.Fatal("expected quit")
+	}
+}
+
+func TestPasteFillsConnectKey(t *testing.T) {
+	m := newTestModel(t)
+	m.director = &fakeDirector{session: m.session, ready: true}
+	m.mode = modeConnect
+	m.connectID = "gemini"
+	updated, _ := m.Update(tea.PasteMsg{Content: "sk-test-key\n"})
+	got := updated.(*model)
+	if got.secret != "sk-test-key" {
+		t.Fatalf("secret %q", got.secret)
+	}
+	plain := ansi.Strip(got.View().Content)
+	if strings.Contains(plain, "sk-test-key") {
+		t.Fatal("pasted key is visible")
+	}
+	if !strings.Contains(plain, strings.Repeat("•", len("sk-test-key"))) {
+		t.Fatalf("hidden key missing: %q", plain)
+	}
+}
+
+func TestEscClosesPicker(t *testing.T) {
+	m := newTestModel(t)
+	m.mode = modeModels
+	updated, cmd := m.Update(press(tea.KeyEsc, 0))
+	got := updated.(*model)
+	if got.quitting || got.mode != modeChat || cmd == nil {
+		t.Fatalf("quitting=%v mode=%d", got.quitting, got.mode)
 	}
 }

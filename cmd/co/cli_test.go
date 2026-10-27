@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -60,6 +62,7 @@ func prepare(t *testing.T) {
 	t.Setenv("CO_HOST", "")
 	t.Setenv("OLLAMA_HOST", "")
 	t.Setenv("CO_LOG_LEVEL", "")
+	t.Setenv("CO_NO_HISTORY", "")
 	t.Chdir(t.TempDir())
 	viper.Reset()
 }
@@ -116,6 +119,7 @@ func TestMissingModelIsUsageError(t *testing.T) {
 func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 	var mu sync.Mutex
 	var sawModel string
+	var chats int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -145,7 +149,11 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 			if !payload.Stream {
 				t.Errorf("chat request did not stream")
 			}
-			if len(payload.Tools) > 0 {
+			mu.Lock()
+			chats++
+			n := chats
+			mu.Unlock()
+			if n == 1 {
 				writeSSE(w, toolChunk("call_list_dir", "list_dir", `{"path":"."}`))
 				return
 			}
@@ -185,5 +193,95 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 	}
 	if strings.Contains(stdout, "tool ") {
 		t.Fatalf("tool trace leaked to stdout %q", stdout)
+	}
+	assertSessionRoles(t, "user", "assistant", "tool", "assistant")
+}
+
+func TestNoHistoryWritesNothing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models/test-model":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"test-model"}`)
+		case "/v1/chat/completions":
+			writeSSE(w, contentChunk("ok"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	prepare(t)
+	stdout, _, err := startCLI(
+		t,
+		"hi\n",
+		"--host",
+		server.URL,
+		"--model",
+		"test-model",
+		"--no-history",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != "ok\n" {
+		t.Fatalf("stdout %q", stdout)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, err := filepath.Glob(filepath.Join(home, ".co", "projects", "*", "sessions", "*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("session files %v", matches)
+	}
+}
+
+func assertSessionRoles(t *testing.T, roles ...string) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, err := filepath.Glob(filepath.Join(home, ".co", "projects", "*", "sessions", "*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("session files %v", matches)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	if len(lines) != len(roles)+1 {
+		t.Fatalf("lines = %d, file %s", len(lines), data)
+	}
+	var header struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
+		t.Fatal(err)
+	}
+	if header.Type != "session" {
+		t.Fatalf("header %s", lines[0])
+	}
+	for i, role := range roles {
+		var rec struct {
+			Seq     int `json:"seq"`
+			Message struct {
+				Role string `json:"role"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(lines[i+1]), &rec); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Seq != i+1 || rec.Message.Role != role {
+			t.Fatalf("line %d seq %d role %q", i+1, rec.Seq, rec.Message.Role)
+		}
 	}
 }

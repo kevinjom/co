@@ -5,11 +5,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"co/internal/ollama"
 	"co/internal/tools"
 )
+
+// Recorder stores completed messages. A nil recorder leaves history off.
+type Recorder interface {
+	Record(msg ollama.Message, interrupted bool) error
+}
 
 // maxToolRounds is how many model calls may include tools.
 // If the model is still calling tools after that, one more call is made with no tools.
@@ -22,16 +28,19 @@ type Session struct {
 	tools    *tools.Set
 	defs     []ollama.Tool
 	messages []ollama.Message
+	recorder Recorder
 }
 
 // NewSession starts a conversation rooted at cwd.
-func NewSession(client *ollama.Client, model, cwd string) *Session {
+// A nil recorder does not write history.
+func NewSession(client *ollama.Client, model, cwd string, recorder Recorder) *Session {
 	set := tools.New(cwd)
 	return &Session{
-		client: client,
-		model:  model,
-		tools:  set,
-		defs:   toolDefinitions(set),
+		client:   client,
+		model:    model,
+		tools:    set,
+		defs:     toolDefinitions(set),
+		recorder: recorder,
 		messages: []ollama.Message{
 			{Role: "system", Content: systemPrompt(cwd)},
 		},
@@ -42,17 +51,14 @@ func NewSession(client *ollama.Client, model, cwd string) *Session {
 // On a model error the user line stays in the session.
 // When the turn is canceled after some text has arrived, that partial answer is kept too.
 func (s *Session) Turn(ctx context.Context, userText string, observe Observer) (string, error) {
-	s.messages = append(s.messages, ollama.Message{
-		Role:    "user",
-		Content: userText,
-	})
+	s.remember(ollama.Message{Role: "user", Content: userText}, false)
 
 	for range maxToolRounds {
 		msg, err := s.complete(ctx, s.defs, observe)
 		if err != nil {
 			return s.keepPartial(msg, err)
 		}
-		s.messages = append(s.messages, msg)
+		s.remember(msg, false)
 		if len(msg.ToolCalls) == 0 {
 			return msg.Content, nil
 		}
@@ -63,7 +69,7 @@ func (s *Session) Turn(ctx context.Context, userText string, observe Observer) (
 	if err != nil {
 		return s.keepPartial(msg, err)
 	}
-	s.messages = append(s.messages, msg)
+	s.remember(msg, false)
 	return msg.Content, nil
 }
 
@@ -84,8 +90,21 @@ func (s *Session) keepPartial(msg ollama.Message, err error) (string, error) {
 	if msg.Role == "" {
 		msg.Role = "assistant"
 	}
-	s.messages = append(s.messages, msg)
+	s.remember(msg, true)
 	return msg.Content, err
+}
+
+// remember keeps a finished message in the session and, when history is on, in the transcript.
+// A write failure disables history for the rest of the process. The turn itself still succeeds.
+func (s *Session) remember(msg ollama.Message, interrupted bool) {
+	s.messages = append(s.messages, msg)
+	if s.recorder == nil {
+		return
+	}
+	if err := s.recorder.Record(msg, interrupted); err != nil {
+		slog.Warn("session history disabled", "err", err)
+		s.recorder = nil
+	}
 }
 
 func (s *Session) runTools(ctx context.Context, calls []ollama.ToolCall, observe Observer) {
@@ -97,11 +116,11 @@ func (s *Session) runTools(ctx context.Context, calls []ollama.ToolCall, observe
 		})
 		result, toolErr := s.tools.Run(ctx, call.Function.Name, map[string]any(call.Function.Arguments))
 		emit(observe, ToolDone{ID: call.ID, Err: toolErr})
-		s.messages = append(s.messages, ollama.Message{
+		s.remember(ollama.Message{
 			Role:       "tool",
 			Content:    result,
 			ToolCallID: call.ID,
-		})
+		}, false)
 	}
 }
 

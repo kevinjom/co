@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -105,7 +106,7 @@ func TestTurnRunsToolThenAnswers(t *testing.T) {
 	}))
 	defer server.Close()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir())
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
 	var events []Event
 	got, err := session.Turn(t.Context(), "what is here?", func(ev Event) {
 		events = append(events, ev)
@@ -191,7 +192,7 @@ func TestTurnDropsToolsAfterCap(t *testing.T) {
 	}))
 	defer server.Close()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir())
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
 	got, err := session.Turn(t.Context(), "keep going", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +222,7 @@ func TestTurnKeepsUserMessageOnModelError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir())
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
 	_, err := session.Turn(t.Context(), "hello", nil)
 	if err == nil {
 		t.Fatal("expected an error")
@@ -251,7 +252,7 @@ func TestTurnKeepsPartialAnswerOnCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir())
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
 	got, err := session.Turn(ctx, "hello", func(ev Event) {
 		if _, ok := ev.(AnswerDelta); ok {
 			cancel()
@@ -270,13 +271,14 @@ func TestTurnKeepsPartialAnswerOnCancel(t *testing.T) {
 }
 
 func TestTurnReportsToolFailure(t *testing.T) {
+	var mu sync.Mutex
+	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var call recordedChat
-		if err := json.NewDecoder(r.Body).Decode(&call); err != nil {
-			t.Errorf("decode: %v", err)
-			return
-		}
-		if len(call.Tools) > 0 {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
 			writeSSE(w, toolChunk("call_read", "read_file", `{"path":"missing.txt"}`))
 			return
 		}
@@ -284,7 +286,7 @@ func TestTurnReportsToolFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir())
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
 	var done ToolDone
 	got, err := session.Turn(t.Context(), "read it", func(ev Event) {
 		if event, ok := ev.(ToolDone); ok {
@@ -306,6 +308,129 @@ func TestTurnReportsToolFailure(t *testing.T) {
 	}
 }
 
+type memRecorder struct {
+	msgs        []ollama.Message
+	interrupted []bool
+	fail        error
+	calls       int
+}
+
+func (m *memRecorder) Record(msg ollama.Message, interrupted bool) error {
+	m.calls++
+	if m.fail != nil {
+		return m.fail
+	}
+	m.msgs = append(m.msgs, msg)
+	m.interrupted = append(m.interrupted, interrupted)
+	return nil
+}
+
+func TestTurnRecordsCompletedMessages(t *testing.T) {
+	var mu sync.Mutex
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			writeSSE(w, toolChunk("call_list_dir", "list_dir", `{"path":"."}`))
+			return
+		}
+		writeSSE(w, contentChunk("two"), contentChunk(" files"))
+	}))
+	defer server.Close()
+
+	rec := &memRecorder{}
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), rec)
+	if _, err := session.Turn(t.Context(), "what is here?", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.msgs) != 4 {
+		t.Fatalf("records = %d, want user, assistant, tool, assistant", len(rec.msgs))
+	}
+	want := []string{"user", "assistant", "tool", "assistant"}
+	for i, role := range want {
+		if rec.msgs[i].Role != role || rec.interrupted[i] {
+			t.Fatalf("record %d role %q interrupted %v", i, rec.msgs[i].Role, rec.interrupted[i])
+		}
+	}
+	if len(rec.msgs[1].ToolCalls) != 1 || rec.msgs[1].ToolCalls[0].Function.Name != "list_dir" {
+		t.Fatalf("tool call %+v", rec.msgs[1].ToolCalls)
+	}
+	if rec.msgs[2].ToolCallID != "call_list_dir" {
+		t.Fatalf("tool result %+v", rec.msgs[2])
+	}
+	if rec.msgs[3].Content != "two files" {
+		t.Fatalf("answer %q", rec.msgs[3].Content)
+	}
+}
+
+func TestTurnDisablesHistoryAfterWriteError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(w, contentChunk("ok"))
+	}))
+	defer server.Close()
+
+	rec := &memRecorder{fail: errors.New("disk full")}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), rec)
+	got, err := session.Turn(t.Context(), "hello", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "ok" {
+		t.Fatalf("answer %q", got)
+	}
+	if rec.calls != 1 {
+		t.Fatalf("record calls = %d, want the user message only", rec.calls)
+	}
+	if session.recorder != nil {
+		t.Fatal("recorder still enabled")
+	}
+}
+
+func TestTurnRecordsInterruptedPartial(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Errorf("response writer cannot flush")
+			return
+		}
+		_, _ = io.WriteString(w, "data: "+contentChunk("partial")+"\n\n")
+		_, _ = io.WriteString(w, "data: "+toolChunk("call_x", "list_dir", `{"path":"."}`)+"\n\n")
+		flusher.Flush()
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	rec := &memRecorder{}
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), rec)
+	_, err := session.Turn(ctx, "hello", func(ev Event) {
+		if _, ok := ev.(AnswerDelta); ok {
+			cancel()
+		}
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(rec.msgs) != 2 {
+		t.Fatalf("records = %d", len(rec.msgs))
+	}
+	if rec.interrupted[0] || rec.msgs[0].Role != "user" {
+		t.Fatalf("user %+v interrupted %v", rec.msgs[0], rec.interrupted[0])
+	}
+	got := rec.msgs[1]
+	if !rec.interrupted[1] || got.Role != "assistant" || got.Content != "partial" || len(got.ToolCalls) != 0 {
+		t.Fatalf("assistant %+v interrupted %v", got, rec.interrupted[1])
+	}
+}
+
 func TestTurnStopsWhenContextIsCanceled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("canceled turn called the server")
@@ -315,7 +440,7 @@ func TestTurnStopsWhenContextIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir())
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
 	_, err := session.Turn(ctx, "hello", nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)

@@ -9,6 +9,7 @@ import (
 
 	"co/internal/agent"
 	"co/internal/ollama"
+	"co/internal/transcript"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -34,6 +35,7 @@ func newRootCmd() (*cobra.Command, error) {
 	cmd.PersistentFlags().String("log-level", "info", "log level (debug, info, warn, error)")
 	cmd.Flags().String("host", defaultHost, "Ollama host")
 	cmd.Flags().String("model", "", "Ollama model name")
+	cmd.Flags().Bool("no-history", false, "do not save the session transcript")
 
 	if err := bindFlag(cmd.PersistentFlags(), "config"); err != nil {
 		return nil, err
@@ -45,6 +47,9 @@ func newRootCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 	if err := bindFlag(cmd.Flags(), "model"); err != nil {
+		return nil, err
+	}
+	if err := bindFlag(cmd.Flags(), "no-history"); err != nil {
 		return nil, err
 	}
 
@@ -92,6 +97,9 @@ func initConfig(cmd *cobra.Command) error {
 	}
 	if err := viper.BindEnv("log-level", "CO_LOG_LEVEL"); err != nil {
 		return fmt.Errorf("binding log-level: %w", err)
+	}
+	if err := viper.BindEnv("no-history", "CO_NO_HISTORY"); err != nil {
+		return fmt.Errorf("binding no-history: %w", err)
 	}
 	viper.SetDefault("host", defaultHost)
 	viper.SetDefault("log-level", "info")
@@ -152,6 +160,30 @@ func run(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("working directory: %w", err)
 	}
-	session := agent.NewSession(client, model, cwd)
+	recorder, closeHistory := openHistory(cwd, model)
+	defer closeHistory()
+	session := agent.NewSession(client, model, cwd, recorder)
 	return repl(cmd, signals, session, model, cwd)
+}
+
+func openHistory(cwd, model string) (agent.Recorder, func()) {
+	noop := func() {}
+	if viper.GetBool("no-history") {
+		return nil, noop
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Warn("session history disabled", "err", err)
+		return nil, noop
+	}
+	history, err := transcript.Open(home, cwd, model)
+	if err != nil {
+		slog.Warn("session history disabled", "err", err)
+		return nil, noop
+	}
+	return history, func() {
+		if err := history.Close(); err != nil {
+			slog.Warn("closing session history", "err", err)
+		}
+	}
 }

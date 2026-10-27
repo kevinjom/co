@@ -17,7 +17,7 @@ import (
 func newTestModel(t *testing.T) *model {
 	t.Helper()
 	dir := t.TempDir()
-	session := agent.NewSession(ollama.New("http://127.0.0.1:1"), "test-model", dir)
+	session := agent.NewSession(ollama.New("http://127.0.0.1:1"), "test-model", dir, nil)
 	m := newModel(context.Background(), session, "test-model", dir)
 	m.width = 80
 	m.height = 24

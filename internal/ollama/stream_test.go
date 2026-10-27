@@ -81,7 +81,12 @@ func TestChatStreamSendsDeltas(t *testing.T) {
 		"m",
 		[]Message{{Role: "user", Content: "hi"}},
 		nil,
-		func(delta string) { deltas = append(deltas, delta) },
+		func(kind StreamKind, delta string) {
+			if kind != StreamContent {
+				t.Errorf("kind %d", kind)
+			}
+			deltas = append(deltas, delta)
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +172,12 @@ func TestChatStreamRejectsMalformedChunk(t *testing.T) {
 		"m",
 		nil,
 		nil,
-		func(delta string) { deltas = append(deltas, delta) },
+		func(kind StreamKind, delta string) {
+			if kind != StreamContent {
+				t.Errorf("kind %d", kind)
+			}
+			deltas = append(deltas, delta)
+		},
 	)
 	if err == nil {
 		t.Fatal("expected an error")
@@ -211,7 +221,7 @@ func TestChatStreamCancelKeepsPartialText(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	msg, err := New(server.URL).ChatStream(ctx, "m", nil, nil, func(string) {
+	msg, err := New(server.URL).ChatStream(ctx, "m", nil, nil, func(StreamKind, string) {
 		cancel()
 	})
 	if !errors.Is(err, context.Canceled) {
@@ -224,6 +234,49 @@ func TestChatStreamCancelKeepsPartialText(t *testing.T) {
 		t.Fatalf("tool calls kept on cancel: %+v", msg.ToolCalls)
 	}
 	<-started
+}
+
+func TestChatStreamSeparatesReasoning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(
+			w,
+			chunkWith("reasoning", "Think"),
+			chunkWith("reasoning", "ing"),
+			chunkWith("content", "Hi"),
+		)
+	}))
+	defer server.Close()
+
+	var got []string
+	msg, err := New(server.URL).ChatStream(t.Context(), "m", nil, nil, func(kind StreamKind, text string) {
+		switch kind {
+		case StreamReasoning:
+			got = append(got, "r:"+text)
+		case StreamContent:
+			got = append(got, "c:"+text)
+		default:
+			t.Errorf("kind %d", kind)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, " ") != "r:Think r:ing c:Hi" {
+		t.Fatalf("chunks %q", got)
+	}
+	if msg.Content != "Hi" {
+		t.Fatalf("content %q", msg.Content)
+	}
+}
+
+func chunkWith(field, text string) string {
+	payload, err := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{"delta": map[string]any{field: text}}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(payload)
 }
 
 func TestChatStreamEmptyBody(t *testing.T) {

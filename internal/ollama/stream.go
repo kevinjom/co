@@ -8,9 +8,20 @@ import (
 	"strings"
 )
 
+// StreamKind says which part of a chunk just arrived.
+type StreamKind int
+
+const (
+	// StreamContent is assistant text that should be shown as the answer.
+	StreamContent StreamKind = iota
+	// StreamReasoning is the model's thinking trace.
+	// Some models, including Qwen, stream the whole reply here and leave content empty.
+	StreamReasoning
+)
+
 // ChatStream sends one streaming chat completion.
-// onDelta is called for each non-empty content chunk, in order.
-// A nil onDelta is ignored.
+// onChunk is called for each non-empty content or reasoning fragment, in order.
+// A nil onChunk is ignored.
 // When ctx ends mid-stream, the returned message holds the text received so far
 // and its tool calls are dropped, because their arguments may be incomplete.
 func (c *Client) ChatStream(
@@ -18,7 +29,7 @@ func (c *Client) ChatStream(
 	model string,
 	messages []Message,
 	tools []Tool,
-	onDelta func(string),
+	onChunk func(StreamKind, string),
 ) (Message, error) {
 	if err := ctx.Err(); err != nil {
 		return Message{}, err
@@ -34,7 +45,7 @@ func (c *Client) ChatStream(
 		Stream:          true,
 		ReasoningEffort: defaultReasoningEffort,
 	}
-	msg, err := c.stream(ctx, payload, onDelta)
+	msg, err := c.stream(ctx, payload, onChunk)
 	if err != nil && ctx.Err() != nil {
 		msg.ToolCalls = nil
 		if msg.Role == "" {
@@ -49,6 +60,7 @@ type streamChunk struct {
 	Choices []struct {
 		Delta struct {
 			Content   *string          `json:"content"`
+			Reasoning *string          `json:"reasoning"`
 			ToolCalls []streamToolCall `json:"tool_calls"`
 		} `json:"delta"`
 	} `json:"choices"`
@@ -71,7 +83,7 @@ type toolDraft struct {
 	args strings.Builder
 }
 
-func (c *Client) stream(ctx context.Context, payload chatRequest, onDelta func(string)) (Message, error) {
+func (c *Client) stream(ctx context.Context, payload chatRequest, onChunk func(StreamKind, string)) (Message, error) {
 	resp, err := c.send(ctx, "POST", "/v1/chat/completions", payload)
 	if err != nil {
 		return Message{}, fmt.Errorf("chat: %w", err)
@@ -106,7 +118,7 @@ func (c *Client) stream(ctx context.Context, payload chatRequest, onDelta func(s
 		}
 
 		sawChunk = true
-		if err := applyChunk(data, &content, &drafts, onDelta); err != nil {
+		if err := applyChunk(data, &content, &drafts, onChunk); err != nil {
 			return fail(fmt.Errorf("chat: %w", err))
 		}
 	}
@@ -130,7 +142,7 @@ func sseData(line string) (string, bool) {
 	return strings.TrimSpace(strings.TrimPrefix(line, "data:")), true
 }
 
-func applyChunk(data string, content *strings.Builder, drafts *[]toolDraft, onDelta func(string)) error {
+func applyChunk(data string, content *strings.Builder, drafts *[]toolDraft, onChunk func(StreamKind, string)) error {
 	var chunk streamChunk
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 		return fmt.Errorf("decoding stream: %w", err)
@@ -141,9 +153,12 @@ func applyChunk(data string, content *strings.Builder, drafts *[]toolDraft, onDe
 	delta := chunk.Choices[0].Delta
 	if delta.Content != nil && *delta.Content != "" {
 		content.WriteString(*delta.Content)
-		if onDelta != nil {
-			onDelta(*delta.Content)
+		if onChunk != nil {
+			onChunk(StreamContent, *delta.Content)
 		}
+	}
+	if delta.Reasoning != nil && *delta.Reasoning != "" && onChunk != nil {
+		onChunk(StreamReasoning, *delta.Reasoning)
 	}
 	appendToolCalls(drafts, delta.ToolCalls)
 	return nil

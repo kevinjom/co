@@ -126,6 +126,8 @@ func renderBlock(block block, width int, th theme) string {
 		return th.dim.Render(line)
 	case blockAssistant:
 		return wrapText(strings.TrimRight(block.text, "\n"), width)
+	case blockReasoning:
+		return th.dim.Render(wrapText(strings.TrimRight(block.text, "\n"), width))
 	case blockError:
 		return th.bad.Render(wrapText(block.text, width))
 	case blockNote:

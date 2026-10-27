@@ -64,6 +64,8 @@ func lineRepl(cmd *cobra.Command, signals *signalSession, session *agent.Session
 			case agent.AnswerDelta:
 				fmt.Fprint(cmd.OutOrStdout(), ev.Text)
 				wrote = true
+			case agent.ReasoningDelta:
+				fmt.Fprint(cmd.ErrOrStderr(), ev.Text)
 			case agent.ToolStart:
 				fmt.Fprintf(cmd.ErrOrStderr(), "tool %s %s\n", ev.Name, ev.Detail)
 			case agent.ToolDone:

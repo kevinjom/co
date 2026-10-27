@@ -129,6 +129,39 @@ func TestTurnMessagesAppendInOrder(t *testing.T) {
 	}
 }
 
+func TestReasoningStreamsBeforeTheAnswer(t *testing.T) {
+	m := newTestModel(t)
+	m.turnID = 1
+	m.busy = true
+	m.events = make(chan tea.Msg)
+	m.Update(eventMsg{id: 1, event: agent.ReasoningDelta{Text: "Think"}})
+	m.Update(eventMsg{id: 1, event: agent.ReasoningDelta{Text: "ing"}})
+	m.Update(eventMsg{id: 1, event: agent.AnswerDelta{Text: "Hi"}})
+	if len(m.blocks) != 2 || m.blocks[0].kind != blockReasoning || m.blocks[0].text != "Thinking" {
+		t.Fatalf("reasoning %+v", m.blocks)
+	}
+	if m.blocks[1].kind != blockAssistant || m.blocks[1].text != "Hi" {
+		t.Fatalf("answer %+v", m.blocks[1])
+	}
+	plain := ansi.Strip(m.renderTranscript())
+	if !strings.Contains(plain, "Thinking") || !strings.Contains(plain, "Hi") {
+		t.Fatalf("transcript %q", plain)
+	}
+}
+
+func TestReasoningOnlyAnswerIsNotDuplicated(t *testing.T) {
+	m := newTestModel(t)
+	m.turnID = 1
+	m.busy = true
+	m.events = make(chan tea.Msg)
+	m.Update(eventMsg{id: 1, event: agent.ReasoningDelta{Text: "the answer"}})
+	updated, _ := m.Update(turnDoneMsg{id: 1, answer: "the answer"})
+	got := updated.(*model)
+	if len(got.blocks) != 1 || got.blocks[0].kind != blockReasoning || got.blocks[0].text != "the answer" {
+		t.Fatalf("blocks %+v", got.blocks)
+	}
+}
+
 func TestAnswerDeltasGrowOneBlock(t *testing.T) {
 	m := newTestModel(t)
 	m.turnID = 1

@@ -431,6 +431,66 @@ func TestTurnRecordsInterruptedPartial(t *testing.T) {
 	}
 }
 
+func TestTurnStreamsReasoningSeparatelyFromAnswer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(w, fieldChunk("reasoning", "Think"), fieldChunk("content", "Hi"))
+	}))
+	defer server.Close()
+
+	var got []string
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
+	answer, err := session.Turn(t.Context(), "hi", func(ev Event) {
+		switch ev := ev.(type) {
+		case ReasoningDelta:
+			got = append(got, "r:"+ev.Text)
+		case AnswerDelta:
+			got = append(got, "c:"+ev.Text)
+		default:
+			t.Fatalf("event %T", ev)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, " ") != "r:Think c:Hi" || answer != "Hi" {
+		t.Fatalf("events %q answer %q", got, answer)
+	}
+	last := session.messages[len(session.messages)-1]
+	if last.Content != "Hi" {
+		t.Fatalf("stored %q", last.Content)
+	}
+}
+
+func TestTurnKeepsReasoningWhenTheAnswerIsEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(w, fieldChunk("reasoning", "the "), fieldChunk("reasoning", "answer"))
+	}))
+	defer server.Close()
+
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir(), nil)
+	answer, err := session.Turn(t.Context(), "explain", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer != "the answer" {
+		t.Fatalf("answer %q", answer)
+	}
+	last := session.messages[len(session.messages)-1]
+	if last.Role != "assistant" || last.Content != "the answer" || len(last.ToolCalls) != 0 {
+		t.Fatalf("stored %+v", last)
+	}
+}
+
+func fieldChunk(field, text string) string {
+	payload, err := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{"delta": map[string]any{field: text}}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(payload)
+}
+
 func TestTurnStopsWhenContextIsCanceled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("canceled turn called the server")

@@ -30,6 +30,7 @@ const (
 	blockAssistant
 	blockError
 	blockNote
+	blockReasoning
 )
 
 type block struct {
@@ -75,11 +76,12 @@ type model struct {
 	cancel context.CancelFunc
 	events <-chan tea.Msg
 
-	dirty        bool
-	paintWaiting bool
-	lastPaint    time.Time
-	answered     bool
-	answerOpen   bool
+	dirty         bool
+	paintWaiting  bool
+	lastPaint     time.Time
+	answered      bool
+	answerOpen    bool
+	reasoningOpen bool
 
 	quitting bool
 	exitErr  error
@@ -236,6 +238,7 @@ func (m *model) submit() tea.Cmd {
 	m.status = "thinking"
 	m.answered = false
 	m.answerOpen = false
+	m.reasoningOpen = false
 	m.addBlock(block{kind: blockUser, text: text})
 	m.layout()
 	m.paint()
@@ -275,9 +278,11 @@ func (m *model) finishTurn(msg turnDoneMsg) (tea.Model, tea.Cmd) {
 	m.busy = false
 	m.status = ""
 	m.answerOpen = false
+	showedReasoning := m.reasoningOpen
+	m.reasoningOpen = false
 	switch {
 	case msg.err == nil:
-		if !m.answered && strings.TrimSpace(msg.answer) != "" {
+		if !m.answered && !showedReasoning && strings.TrimSpace(msg.answer) != "" {
 			m.addBlock(block{kind: blockAssistant, text: msg.answer})
 		}
 	case errors.Is(msg.err, context.Canceled), errors.Is(msg.err, context.DeadlineExceeded):
@@ -325,10 +330,13 @@ func (m *model) applyEvent(msg eventMsg) bool {
 		return false
 	}
 	switch ev := msg.event.(type) {
+	case agent.ReasoningDelta:
+		m.appendReasoning(ev.Text)
 	case agent.AnswerDelta:
 		m.appendAnswer(ev.Text)
 	case agent.ToolStart:
 		m.answerOpen = false
+		m.reasoningOpen = false
 		m.status = strings.TrimSpace(ev.Name + " " + ev.Detail)
 		m.addBlock(block{
 			kind:   blockTool,
@@ -347,6 +355,7 @@ func (m *model) applyEvent(msg eventMsg) bool {
 func (m *model) appendAnswer(text string) {
 	m.status = "answering"
 	m.answered = true
+	m.reasoningOpen = false
 	last := len(m.blocks) - 1
 	if m.answerOpen && last >= 0 && m.blocks[last].kind == blockAssistant {
 		m.blocks[last].text += text
@@ -354,6 +363,17 @@ func (m *model) appendAnswer(text string) {
 	}
 	m.answerOpen = true
 	m.blocks = append(m.blocks, block{kind: blockAssistant, text: text})
+}
+
+func (m *model) appendReasoning(text string) {
+	m.status = "thinking"
+	last := len(m.blocks) - 1
+	if m.reasoningOpen && last >= 0 && m.blocks[last].kind == blockReasoning {
+		m.blocks[last].text += text
+		return
+	}
+	m.reasoningOpen = true
+	m.blocks = append(m.blocks, block{kind: blockReasoning, text: text})
 }
 
 func (m *model) markTool(ev agent.ToolDone) {

@@ -3,10 +3,17 @@ package agent
 import "fmt"
 
 // Event is one observation from a turn.
-// The set is closed: AnswerDelta, ToolStart, and ToolDone.
+// The set is closed: ReasoningDelta, AnswerDelta, ToolStart, and ToolDone.
 type Event interface {
 	event()
 }
+
+// ReasoningDelta is one piece of the model's thinking trace, in order.
+type ReasoningDelta struct {
+	Text string
+}
+
+func (ReasoningDelta) event() {}
 
 // AnswerDelta is one piece of assistant text, in order.
 type AnswerDelta struct {
@@ -41,7 +48,7 @@ func emit(observe Observer, ev Event) {
 		return
 	}
 	switch ev.(type) {
-	case AnswerDelta, ToolStart, ToolDone:
+	case ReasoningDelta, AnswerDelta, ToolStart, ToolDone:
 		observe(ev)
 	default:
 		panic(fmt.Sprintf("unhandled agent event %T", ev))

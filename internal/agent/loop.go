@@ -74,9 +74,28 @@ func (s *Session) Turn(ctx context.Context, userText string, observe Observer) (
 }
 
 func (s *Session) complete(ctx context.Context, defs []ollama.Tool, observe Observer) (ollama.Message, error) {
-	return s.client.ChatStream(ctx, s.model, s.messages, defs, func(delta string) {
-		emit(observe, AnswerDelta{Text: delta})
+	var reasoning strings.Builder
+	msg, err := s.client.ChatStream(ctx, s.model, s.messages, defs, func(kind ollama.StreamKind, text string) {
+		switch kind {
+		case ollama.StreamContent:
+			emit(observe, AnswerDelta{Text: text})
+		case ollama.StreamReasoning:
+			reasoning.WriteString(text)
+			emit(observe, ReasoningDelta{Text: text})
+		default:
+			panic(fmt.Sprintf("unhandled stream kind %d", kind))
+		}
 	})
+	msg.Content = answerText(msg, reasoning.String())
+	return msg, err
+}
+
+// answerText keeps a reasoning-only reply. A tool call stays content-free.
+func answerText(msg ollama.Message, reasoning string) string {
+	if strings.TrimSpace(msg.Content) != "" || len(msg.ToolCalls) > 0 {
+		return msg.Content
+	}
+	return reasoning
 }
 
 // keepPartial stores a canceled answer so the next turn can see what the user already saw.

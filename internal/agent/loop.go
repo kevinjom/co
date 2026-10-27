@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -13,9 +14,6 @@ import (
 // maxToolRounds is how many model calls may include tools.
 // If the model is still calling tools after that, one more call is made with no tools.
 const maxToolRounds = 8
-
-// Trace receives one line each time a tool runs.
-type Trace func(line string)
 
 // Session is the in-memory conversation for one process.
 type Session struct {
@@ -42,40 +40,66 @@ func NewSession(client *ollama.Client, model, cwd string) *Session {
 
 // Turn appends the user line and runs tools until the model answers.
 // On a model error the user line stays in the session.
-func (s *Session) Turn(ctx context.Context, userText string, trace Trace) (string, error) {
+// When the turn is canceled after some text has arrived, that partial answer is kept too.
+func (s *Session) Turn(ctx context.Context, userText string, observe Observer) (string, error) {
 	s.messages = append(s.messages, ollama.Message{
 		Role:    "user",
 		Content: userText,
 	})
 
 	for range maxToolRounds {
-		msg, err := s.client.Chat(ctx, s.model, s.messages, s.defs)
+		msg, err := s.complete(ctx, s.defs, observe)
 		if err != nil {
-			return "", err
+			return s.keepPartial(msg, err)
 		}
 		s.messages = append(s.messages, msg)
 		if len(msg.ToolCalls) == 0 {
 			return msg.Content, nil
 		}
-		s.runTools(ctx, msg.ToolCalls, trace)
+		s.runTools(ctx, msg.ToolCalls, observe)
 	}
 
-	msg, err := s.client.Chat(ctx, s.model, s.messages, nil)
+	msg, err := s.complete(ctx, nil, observe)
 	if err != nil {
-		return "", err
+		return s.keepPartial(msg, err)
 	}
 	s.messages = append(s.messages, msg)
 	return msg.Content, nil
 }
 
-func (s *Session) runTools(ctx context.Context, calls []ollama.ToolCall, trace Trace) {
+func (s *Session) complete(ctx context.Context, defs []ollama.Tool, observe Observer) (ollama.Message, error) {
+	return s.client.ChatStream(ctx, s.model, s.messages, defs, func(delta string) {
+		emit(observe, AnswerDelta{Text: delta})
+	})
+}
+
+// keepPartial stores a canceled answer so the next turn can see what the user already saw.
+// Any other error leaves the session unchanged apart from the user line.
+func (s *Session) keepPartial(msg ollama.Message, err error) (string, error) {
+	stopped := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	if !stopped || msg.Content == "" {
+		return "", err
+	}
+	msg.ToolCalls = nil
+	if msg.Role == "" {
+		msg.Role = "assistant"
+	}
+	s.messages = append(s.messages, msg)
+	return msg.Content, err
+}
+
+func (s *Session) runTools(ctx context.Context, calls []ollama.ToolCall, observe Observer) {
 	for _, call := range calls {
-		if trace != nil {
-			trace(toolTrace(call))
-		}
+		emit(observe, ToolStart{
+			ID:     call.ID,
+			Name:   call.Function.Name,
+			Detail: toolDetail(call),
+		})
+		result, toolErr := s.tools.Run(ctx, call.Function.Name, map[string]any(call.Function.Arguments))
+		emit(observe, ToolDone{ID: call.ID, Err: toolErr})
 		s.messages = append(s.messages, ollama.Message{
 			Role:       "tool",
-			Content:    s.tools.Run(ctx, call.Function.Name, map[string]any(call.Function.Arguments)),
+			Content:    result,
 			ToolCallID: call.ID,
 		})
 	}
@@ -109,23 +133,21 @@ func toolDefinitions(set *tools.Set) []ollama.Tool {
 	return defs
 }
 
-func toolTrace(call ollama.ToolCall) string {
+func toolDetail(call ollama.ToolCall) string {
 	args := call.Function.Arguments
 	if args == nil {
 		args = ollama.Arguments{}
 	}
 
-	detail := ""
 	switch call.Function.Name {
 	case "grep":
 		pattern, _ := args["pattern"].(string)
-		detail = fmt.Sprintf("pattern=%q", pattern)
+		return fmt.Sprintf("pattern=%q", pattern)
 	default:
 		path, _ := args["path"].(string)
 		if path == "" {
 			path = "."
 		}
-		detail = "path=" + path
+		return "path=" + path
 	}
-	return "tool " + call.Function.Name + " " + detail
 }

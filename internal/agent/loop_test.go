@@ -7,30 +7,52 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"co/internal/ollama"
 )
 
-func listDirToolCall(arguments string) string {
-	return `{
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": null,
-      "tool_calls": [{
-        "id": "call_list_dir",
-        "type": "function",
-        "function": {
-          "name": "list_dir",
-          "arguments": ` + strconv.Quote(arguments) + `
-        }
-      }]
-    }
-  }]
-}`
+func writeSSE(w http.ResponseWriter, chunks ...string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, chunk := range chunks {
+		_, _ = io.WriteString(w, "data: "+chunk+"\n\n")
+	}
+	_, _ = io.WriteString(w, "data: [DONE]\n\n")
+}
+
+func contentChunk(text string) string {
+	payload, err := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{"delta": map[string]any{"content": text}}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(payload)
+}
+
+func toolChunk(id, name, arguments string) string {
+	call := map[string]any{
+		"function": map[string]any{
+			"name":      name,
+			"arguments": arguments,
+		},
+	}
+	if id != "" {
+		call["id"] = id
+		call["type"] = "function"
+	}
+	payload, err := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{"delta": map[string]any{
+			"tool_calls": []any{call},
+		}}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(payload)
 }
 
 type recordedChat struct {
@@ -72,19 +94,21 @@ func TestTurnRunsToolThenAnswers(t *testing.T) {
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("path %s", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/json")
 		if n == 1 {
-			_, _ = io.WriteString(w, listDirToolCall(`{"path":"."}`))
+			writeSSE(w,
+				toolChunk("call_list_dir", "list_dir", `{"pa`),
+				toolChunk("", "", `th":"."}`),
+			)
 			return
 		}
-		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"two files"}}]}`)
+		writeSSE(w, contentChunk("two"), contentChunk(" files"))
 	}))
 	defer server.Close()
 
 	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir())
-	var traces []string
-	got, err := session.Turn(t.Context(), "what is here?", func(line string) {
-		traces = append(traces, line)
+	var events []Event
+	got, err := session.Turn(t.Context(), "what is here?", func(ev Event) {
+		events = append(events, ev)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,8 +116,21 @@ func TestTurnRunsToolThenAnswers(t *testing.T) {
 	if got != "two files" {
 		t.Fatalf("answer %q", got)
 	}
-	if len(traces) != 1 || traces[0] != "tool list_dir path=." {
-		t.Fatalf("traces %q", traces)
+	if len(events) != 4 {
+		t.Fatalf("events %+v", events)
+	}
+	start, ok := events[0].(ToolStart)
+	if !ok || start.Name != "list_dir" || start.Detail != "path=." || start.ID != "call_list_dir" {
+		t.Fatalf("start %+v", events[0])
+	}
+	done, ok := events[1].(ToolDone)
+	if !ok || done.ID != "call_list_dir" || done.Err != nil {
+		t.Fatalf("done %+v", events[1])
+	}
+	first, ok := events[2].(AnswerDelta)
+	second, ok2 := events[3].(AnswerDelta)
+	if !ok || !ok2 || first.Text+second.Text != "two files" {
+		t.Fatalf("deltas %+v %+v", events[2], events[3])
 	}
 
 	mu.Lock()
@@ -101,11 +138,11 @@ func TestTurnRunsToolThenAnswers(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("calls = %d", len(calls))
 	}
-	if len(calls[0].Tools) == 0 || calls[0].Stream {
-		t.Fatalf("first call omitted tools or streamed")
+	if len(calls[0].Tools) == 0 || !calls[0].Stream {
+		t.Fatalf("first call omitted tools or did not stream")
 	}
-	if len(calls[1].Tools) == 0 || calls[1].Stream {
-		t.Fatalf("second call omitted tools or streamed")
+	if len(calls[1].Tools) == 0 || !calls[1].Stream {
+		t.Fatalf("second call omitted tools or did not stream")
 	}
 	for i, call := range calls {
 		if call.ReasoningEffort != "low" {
@@ -146,12 +183,11 @@ func TestTurnDropsToolsAfterCap(t *testing.T) {
 		hasTools := len(call.Tools) > 0
 		mu.Unlock()
 
-		w.Header().Set("Content-Type", "application/json")
 		if hasTools {
-			_, _ = io.WriteString(w, listDirToolCall(`{}`))
+			writeSSE(w, toolChunk("call_list_dir", "list_dir", `{}`))
 			return
 		}
-		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"stopped"}}]}`)
+		writeSSE(w, contentChunk("stopped"))
 	}))
 	defer server.Close()
 
@@ -195,6 +231,78 @@ func TestTurnKeepsUserMessageOnModelError(t *testing.T) {
 	}
 	if session.messages[1].Role != "user" || session.messages[1].Content != "hello" {
 		t.Fatalf("user message = %+v", session.messages[1])
+	}
+}
+
+func TestTurnKeepsPartialAnswerOnCancel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Errorf("response writer cannot flush")
+			return
+		}
+		_, _ = io.WriteString(w, "data: "+contentChunk("partial")+"\n\n")
+		flusher.Flush()
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir())
+	got, err := session.Turn(ctx, "hello", func(ev Event) {
+		if _, ok := ev.(AnswerDelta); ok {
+			cancel()
+		}
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	if got != "partial" {
+		t.Fatalf("answer %q", got)
+	}
+	last := session.messages[len(session.messages)-1]
+	if last.Role != "assistant" || last.Content != "partial" || len(last.ToolCalls) != 0 {
+		t.Fatalf("last message %+v", last)
+	}
+}
+
+func TestTurnReportsToolFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var call recordedChat
+		if err := json.NewDecoder(r.Body).Decode(&call); err != nil {
+			t.Errorf("decode: %v", err)
+			return
+		}
+		if len(call.Tools) > 0 {
+			writeSSE(w, toolChunk("call_read", "read_file", `{"path":"missing.txt"}`))
+			return
+		}
+		writeSSE(w, contentChunk("the file is missing"))
+	}))
+	defer server.Close()
+
+	session := NewSession(ollama.New(server.URL), "test-model", t.TempDir())
+	var done ToolDone
+	got, err := session.Turn(t.Context(), "read it", func(ev Event) {
+		if event, ok := ev.(ToolDone); ok {
+			done = event
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "the file is missing" {
+		t.Fatalf("answer %q", got)
+	}
+	if done.ID != "call_read" || done.Err == nil {
+		t.Fatalf("done %+v", done)
+	}
+	toolMsg := session.messages[len(session.messages)-2]
+	if toolMsg.Role != "tool" || !strings.HasPrefix(toolMsg.Content, "error:") {
+		t.Fatalf("tool message %+v", toolMsg)
 	}
 }
 

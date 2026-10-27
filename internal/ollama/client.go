@@ -38,14 +38,6 @@ type chatRequest struct {
 	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
 }
 
-type chatResponse struct {
-	Choices []chatChoice `json:"choices"`
-}
-
-type chatChoice struct {
-	Message apiMessage `json:"message"`
-}
-
 // apiMessage decodes a choice. Content is null when the model only calls tools.
 type apiMessage struct {
 	Role      string     `json:"role"`
@@ -64,34 +56,6 @@ func (c *Client) Show(ctx context.Context, model string) error {
 		return fmt.Errorf("model %q: %w", model, err)
 	}
 	return nil
-}
-
-// Chat sends one non-streaming chat completion.
-// An empty tools slice omits tools from the request.
-func (c *Client) Chat(ctx context.Context, model string, messages []Message, tools []Tool) (Message, error) {
-	if err := ctx.Err(); err != nil {
-		return Message{}, err
-	}
-	if messages == nil {
-		messages = []Message{}
-	}
-
-	payload := chatRequest{
-		Model:           model,
-		Messages:        messages,
-		Tools:           tools,
-		Stream:          false,
-		ReasoningEffort: defaultReasoningEffort,
-	}
-
-	var decoded chatResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/chat/completions", payload, &decoded); err != nil {
-		return Message{}, fmt.Errorf("chat: %w", err)
-	}
-	if len(decoded.Choices) == 0 {
-		return Message{}, fmt.Errorf("chat: no choices")
-	}
-	return decoded.Choices[0].Message.message(), nil
 }
 
 func (m apiMessage) message() Message {

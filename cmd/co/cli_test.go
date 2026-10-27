@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -16,23 +15,41 @@ import (
 	"github.com/spf13/viper"
 )
 
-func listDirToolCall(arguments string) string {
-	return `{
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": null,
-      "tool_calls": [{
-        "id": "call_list_dir",
-        "type": "function",
-        "function": {
-          "name": "list_dir",
-          "arguments": ` + strconv.Quote(arguments) + `
-        }
-      }]
-    }
-  }]
-}`
+func writeSSE(w http.ResponseWriter, chunks ...string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, chunk := range chunks {
+		_, _ = io.WriteString(w, "data: "+chunk+"\n\n")
+	}
+	_, _ = io.WriteString(w, "data: [DONE]\n\n")
+}
+
+func contentChunk(text string) string {
+	payload, err := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{"delta": map[string]any{"content": text}}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(payload)
+}
+
+func toolChunk(id, name, arguments string) string {
+	payload, err := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{
+			map[string]any{
+				"id":   id,
+				"type": "function",
+				"function": map[string]any{
+					"name":      name,
+					"arguments": arguments,
+				},
+			},
+		}}}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(payload)
 }
 
 func prepare(t *testing.T) {
@@ -105,7 +122,6 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 			t.Errorf("read body: %v", err)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/models/test-model":
 			if r.Method != http.MethodGet {
@@ -115,20 +131,25 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 			mu.Lock()
 			sawModel = "test-model"
 			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `{"id":"test-model"}`)
 		case "/v1/chat/completions":
 			var payload struct {
-				Tools []any `json:"tools"`
+				Tools  []any `json:"tools"`
+				Stream bool  `json:"stream"`
 			}
 			if err := json.Unmarshal(body, &payload); err != nil {
 				t.Errorf("decode chat: %v", err)
 				return
 			}
+			if !payload.Stream {
+				t.Errorf("chat request did not stream")
+			}
 			if len(payload.Tools) > 0 {
-				_, _ = io.WriteString(w, listDirToolCall(`{"path":"."}`))
+				writeSSE(w, toolChunk("call_list_dir", "list_dir", `{"path":"."}`))
 				return
 			}
-			_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"There are 3 lines."}}]}`)
+			writeSSE(w, contentChunk("There are "), contentChunk("3 lines."))
 		default:
 			http.NotFound(w, r)
 		}

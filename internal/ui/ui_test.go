@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -110,12 +111,12 @@ func TestTurnMessagesAppendInOrder(t *testing.T) {
 	m.turnID = 1
 	m.busy = true
 	m.events = make(chan tea.Msg)
-
-	_, cmd := m.Update(toolMsg{id: 1, line: "tool list_dir path=."})
+	_, cmd := m.Update(eventMsg{id: 1, event: agent.ToolStart{ID: "call_1", Name: "list_dir", Detail: "path=."}})
 	if cmd == nil {
 		t.Fatal("expected to keep listening")
 	}
-	updated, _ := m.Update(turnDoneMsg{id: 1, answer: "two files"})
+	updated, _ := m.Update(eventMsg{id: 1, event: agent.AnswerDelta{Text: "two files"}})
+	updated, _ = updated.(*model).Update(turnDoneMsg{id: 1, answer: "two files"})
 	got := updated.(*model)
 	if got.busy {
 		t.Fatal("still busy")
@@ -125,6 +126,60 @@ func TestTurnMessagesAppendInOrder(t *testing.T) {
 	answerAt := strings.Index(plain, "two files")
 	if toolAt < 0 || answerAt < 0 || toolAt > answerAt {
 		t.Fatalf("transcript %q", plain)
+	}
+}
+
+func TestAnswerDeltasGrowOneBlock(t *testing.T) {
+	m := newTestModel(t)
+	m.turnID = 1
+	m.busy = true
+	m.events = make(chan tea.Msg)
+	m.Update(eventMsg{id: 1, event: agent.AnswerDelta{Text: "hel"}})
+	m.Update(eventMsg{id: 1, event: agent.AnswerDelta{Text: "lo"}})
+	if len(m.blocks) != 1 || m.blocks[0].kind != blockAssistant || m.blocks[0].text != "hello" {
+		t.Fatalf("blocks %+v", m.blocks)
+	}
+	if m.status != "answering" {
+		t.Fatalf("status %q", m.status)
+	}
+}
+
+func TestToolErrorMarksTheLine(t *testing.T) {
+	m := newTestModel(t)
+	m.turnID = 1
+	m.busy = true
+	m.events = make(chan tea.Msg)
+	m.Update(eventMsg{id: 1, event: agent.ToolStart{ID: "call_1", Name: "read_file", Detail: "path=missing"}})
+	m.Update(eventMsg{id: 1, event: agent.ToolDone{ID: "call_1", Err: errors.New("missing")}})
+	if len(m.blocks) != 1 || !m.blocks[0].failed {
+		t.Fatalf("blocks %+v", m.blocks)
+	}
+	plain := ansi.Strip(m.renderTranscript())
+	if !strings.Contains(plain, "read_file path=missing") {
+		t.Fatalf("transcript %q", plain)
+	}
+}
+
+func TestCtrlCKeepsPartialAnswer(t *testing.T) {
+	m := newTestModel(t)
+	m.turnID = 1
+	m.busy = true
+	m.events = make(chan tea.Msg)
+	canceled := false
+	m.cancel = func() { canceled = true }
+	m.Update(eventMsg{id: 1, event: agent.AnswerDelta{Text: "partial answer"}})
+	_, cmd := m.Update(press('c', tea.ModCtrl))
+	if !canceled || m.quitting || cmd != nil {
+		t.Fatalf("canceled=%v quitting=%v cmd=%v", canceled, m.quitting, cmd != nil)
+	}
+	updated, cmd := m.Update(turnDoneMsg{id: 1, answer: "partial answer", err: context.Canceled})
+	got := updated.(*model)
+	plain := ansi.Strip(got.renderTranscript())
+	if !strings.Contains(plain, "partial answer") || !strings.Contains(plain, "interrupted") {
+		t.Fatalf("transcript %q", plain)
+	}
+	if got.busy || cmd == nil {
+		t.Fatal("expected the turn to finish")
 	}
 }
 

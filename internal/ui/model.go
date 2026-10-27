@@ -3,7 +3,9 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -13,6 +15,11 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"co/internal/agent"
+)
+
+const (
+	paintGap    = time.Second / 30
+	eventBuffer = 256
 )
 
 type blockKind int
@@ -26,14 +33,18 @@ const (
 )
 
 type block struct {
-	kind blockKind
-	text string
+	kind   blockKind
+	text   string
+	toolID string
+	failed bool
 }
 
-type toolMsg struct {
-	id   int
-	line string
+type eventMsg struct {
+	id    int
+	event agent.Event
 }
+
+type paintMsg struct{}
 
 type turnDoneMsg struct {
 	id     int
@@ -63,6 +74,12 @@ type model struct {
 	turnID int
 	cancel context.CancelFunc
 	events <-chan tea.Msg
+
+	dirty        bool
+	paintWaiting bool
+	lastPaint    time.Time
+	answered     bool
+	answerOpen   bool
 
 	quitting bool
 	exitErr  error
@@ -145,13 +162,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
 
-	case toolMsg:
-		if msg.id != m.turnID {
-			return m, nil
+	case eventMsg:
+		return m, m.onEvents(msg)
+
+	case paintMsg:
+		m.paintWaiting = false
+		if m.dirty {
+			m.paint()
 		}
-		m.status = strings.TrimPrefix(msg.line, "tool ")
-		m.addBlock(block{kind: blockTool, text: msg.line})
-		return m, waitEvent(m.events)
+		return m, nil
 
 	case turnDoneMsg:
 		return m.finishTurn(msg)
@@ -215,20 +234,23 @@ func (m *model) submit() tea.Cmd {
 	m.input.Blur()
 	m.busy = true
 	m.status = "thinking"
+	m.answered = false
+	m.answerOpen = false
 	m.addBlock(block{kind: blockUser, text: text})
 	m.layout()
+	m.paint()
 
 	m.turnID++
 	id := m.turnID
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancel = cancel
 
-	ch := make(chan tea.Msg, 8)
+	ch := make(chan tea.Msg, eventBuffer)
 	session := m.session
 	go func() {
 		defer close(ch)
-		answer, err := session.Turn(ctx, text, func(line string) {
-			ch <- toolMsg{id: id, line: line}
+		answer, err := session.Turn(ctx, text, func(ev agent.Event) {
+			ch <- eventMsg{id: id, event: ev}
 		})
 		ch <- turnDoneMsg{id: id, answer: answer, err: err}
 	}()
@@ -238,6 +260,9 @@ func (m *model) submit() tea.Cmd {
 
 func (m *model) finishTurn(msg turnDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.id != m.turnID {
+		if m.busy {
+			return m, waitEvent(m.events)
+		}
 		return m, nil
 	}
 	m.cancelTurn()
@@ -249,16 +274,114 @@ func (m *model) finishTurn(msg turnDoneMsg) (tea.Model, tea.Cmd) {
 
 	m.busy = false
 	m.status = ""
+	m.answerOpen = false
 	switch {
-	case msg.err == nil && strings.TrimSpace(msg.answer) != "":
-		m.addBlock(block{kind: blockAssistant, text: msg.answer})
-	case msg.err != nil && errors.Is(msg.err, context.Canceled):
+	case msg.err == nil:
+		if !m.answered && strings.TrimSpace(msg.answer) != "" {
+			m.addBlock(block{kind: blockAssistant, text: msg.answer})
+		}
+	case errors.Is(msg.err, context.Canceled), errors.Is(msg.err, context.DeadlineExceeded):
 		m.addBlock(block{kind: blockNote, text: "interrupted"})
-	case msg.err != nil:
+	default:
 		m.addBlock(block{kind: blockError, text: msg.err.Error()})
 	}
+	m.answered = false
 	m.layout()
+	m.paint()
 	return m, m.input.Focus()
+}
+
+func (m *model) onEvents(msg eventMsg) tea.Cmd {
+	if !m.applyEvent(msg) {
+		if m.busy {
+			return waitEvent(m.events)
+		}
+		return nil
+	}
+	for {
+		select {
+		case next, ok := <-m.events:
+			if !ok {
+				m.paint()
+				return nil
+			}
+			switch next := next.(type) {
+			case eventMsg:
+				m.applyEvent(next)
+			case turnDoneMsg:
+				_, cmd := m.finishTurn(next)
+				return cmd
+			default:
+				panic(fmt.Sprintf("unhandled turn message %T", next))
+			}
+		default:
+			return tea.Batch(m.schedulePaint(), waitEvent(m.events))
+		}
+	}
+}
+
+func (m *model) applyEvent(msg eventMsg) bool {
+	if msg.id != m.turnID {
+		return false
+	}
+	switch ev := msg.event.(type) {
+	case agent.AnswerDelta:
+		m.appendAnswer(ev.Text)
+	case agent.ToolStart:
+		m.answerOpen = false
+		m.status = strings.TrimSpace(ev.Name + " " + ev.Detail)
+		m.addBlock(block{
+			kind:   blockTool,
+			text:   "tool " + ev.Name + " " + ev.Detail,
+			toolID: ev.ID,
+		})
+	case agent.ToolDone:
+		m.markTool(ev)
+	default:
+		panic(fmt.Sprintf("unhandled agent event %T", msg.event))
+	}
+	m.dirty = true
+	return true
+}
+
+func (m *model) appendAnswer(text string) {
+	m.status = "answering"
+	m.answered = true
+	last := len(m.blocks) - 1
+	if m.answerOpen && last >= 0 && m.blocks[last].kind == blockAssistant {
+		m.blocks[last].text += text
+		return
+	}
+	m.answerOpen = true
+	m.blocks = append(m.blocks, block{kind: blockAssistant, text: text})
+}
+
+func (m *model) markTool(ev agent.ToolDone) {
+	if ev.Err == nil {
+		return
+	}
+	for i := range m.blocks {
+		if m.blocks[i].kind == blockTool && m.blocks[i].toolID == ev.ID {
+			m.blocks[i].failed = true
+			return
+		}
+	}
+}
+
+func (m *model) schedulePaint() tea.Cmd {
+	if !m.dirty {
+		return nil
+	}
+	if m.lastPaint.IsZero() || time.Since(m.lastPaint) >= paintGap {
+		m.paint()
+		return nil
+	}
+	if m.paintWaiting {
+		return nil
+	}
+	m.paintWaiting = true
+	wait := paintGap - time.Since(m.lastPaint)
+	return tea.Tick(wait, func(time.Time) tea.Msg { return paintMsg{} })
 }
 
 func (m *model) quit() (tea.Model, tea.Cmd) {
@@ -281,6 +404,8 @@ func (m *model) addBlock(b block) {
 }
 
 func (m *model) paint() {
+	m.dirty = false
+	m.lastPaint = time.Now()
 	follow := m.viewport.AtBottom()
 	m.viewport.SetContent(m.renderTranscript())
 	if follow {

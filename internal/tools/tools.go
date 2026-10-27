@@ -66,10 +66,11 @@ func (s *Set) Schemas() []Schema {
 	return out
 }
 
-// Run executes a tool. Failures are returned as text so the model can recover.
-func (s *Set) Run(ctx context.Context, name string, args map[string]any) string {
+// Run executes a tool.
+// Failures are returned as text so the model can recover, and as an error so the UI can mark them.
+func (s *Set) Run(ctx context.Context, name string, args map[string]any) (string, error) {
 	if err := ctx.Err(); err != nil {
-		return fmt.Sprintf("error: %s", err)
+		return fmt.Sprintf("error: %s", err), err
 	}
 	if args == nil {
 		args = map[string]any{}
@@ -81,11 +82,12 @@ func (s *Set) Run(ctx context.Context, name string, args map[string]any) string 
 		}
 		out, err := tool.run(ctx, args)
 		if err != nil {
-			return fmt.Sprintf("error: %s", err)
+			return fmt.Sprintf("error: %s", err), err
 		}
-		return out
+		return out, nil
 	}
-	return fmt.Sprintf("error: unknown tool %q", name)
+	err := fmt.Errorf("unknown tool %q", name)
+	return fmt.Sprintf("error: %s", err), err
 }
 
 func listDirSchema() Schema {

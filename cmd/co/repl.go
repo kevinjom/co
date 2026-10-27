@@ -58,16 +58,33 @@ func lineRepl(cmd *cobra.Command, signals *signalSession, session *agent.Session
 			return nil
 		}
 
-		answer, err := session.Turn(signals.ctx, line, func(trace string) {
-			fmt.Fprintln(cmd.ErrOrStderr(), trace)
+		wrote := false
+		answer, err := session.Turn(signals.ctx, line, func(ev agent.Event) {
+			switch ev := ev.(type) {
+			case agent.AnswerDelta:
+				fmt.Fprint(cmd.OutOrStdout(), ev.Text)
+				wrote = true
+			case agent.ToolStart:
+				fmt.Fprintf(cmd.ErrOrStderr(), "tool %s %s\n", ev.Name, ev.Detail)
+			case agent.ToolDone:
+				if ev.Err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "tool %s error: %s\n", ev.ID, ev.Err)
+				}
+			default:
+				panic(fmt.Sprintf("unhandled agent event %T", ev))
+			}
 		})
+		if wrote {
+			fmt.Fprintln(cmd.OutOrStdout())
+		} else if err == nil && answer != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), answer)
+		}
 		if err != nil {
 			if signals.ctx.Err() != nil {
 				return signals.err()
 			}
 			return err
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), answer)
 	}
 }
 

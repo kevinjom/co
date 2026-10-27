@@ -62,10 +62,13 @@ func TestGrepSkipsGitAndCapsMatches(t *testing.T) {
 	}
 
 	set := New(root)
-	got := set.Run(t.Context(), "grep", map[string]any{
+	got, err := set.Run(t.Context(), "grep", map[string]any{
 		"pattern": "secret-pattern",
 		"path":    ".",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(got, ".git") {
 		t.Fatalf("grep searched .git: %q", got)
 	}
@@ -81,10 +84,13 @@ func TestGrepSkipsGitAndCapsMatches(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "lines.txt"), []byte(hits.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got = set.Run(t.Context(), "grep", map[string]any{
+	got, err = set.Run(t.Context(), "grep", map[string]any{
 		"pattern": "hit",
 		"path":    "lines.txt",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(got, "matches: 50\n") || !strings.Contains(got, "truncated: true\n") {
 		t.Fatalf("cap not applied: %q", got)
 	}

@@ -119,7 +119,11 @@ func renderBlock(block block, width int, th theme) string {
 		return hang(th.accent.Render("❯ "), block.text, width)
 	case blockTool:
 		detail := strings.TrimPrefix(block.text, "tool ")
-		return th.dim.Render(hang("· ", detail, width))
+		line := hang("· ", detail, width)
+		if block.failed {
+			return th.bad.Render(line)
+		}
+		return th.dim.Render(line)
 	case blockAssistant:
 		return wrapText(strings.TrimRight(block.text, "\n"), width)
 	case blockError:

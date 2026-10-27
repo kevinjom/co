@@ -44,6 +44,7 @@ type LoadOptions struct {
 
 // Catalog is the merged set of providers for one process.
 type Catalog struct {
+	homeDir   string
 	homeFile  string
 	isolated  bool
 	flag      string
@@ -53,6 +54,11 @@ type Catalog struct {
 	keys      map[string]string
 }
 
+// HomeConfig is the user config file, ~/.co/config.yaml.
+func HomeConfig(home string) string {
+	return filepath.Join(home, ".co", "config.yaml")
+}
+
 // Load reads config, credentials, and the built-in ollama provider.
 func Load(opt LoadOptions) (*Catalog, error) {
 	if opt.HostSet && strings.TrimSpace(opt.Host) == "" {
@@ -60,7 +66,8 @@ func Load(opt LoadOptions) (*Catalog, error) {
 	}
 
 	cat := &Catalog{
-		homeFile: filepath.Join(opt.Home, ".co.yaml"),
+		homeDir:  opt.Home,
+		homeFile: HomeConfig(opt.Home),
 		flag:     strings.TrimSpace(opt.FlagModel),
 		keys:     map[string]string{},
 	}
@@ -119,8 +126,8 @@ func Load(opt LoadOptions) (*Catalog, error) {
 }
 
 // Selected is the model for this process before /models.
-// Precedence is the flag, then ~/.co.yaml, then the project or --config file.
-// An isolated catalog ignores ~/.co.yaml.
+// Precedence is the flag, then ~/.co/config.yaml, then the project or --config file.
+// An isolated catalog ignores ~/.co/config.yaml.
 func (c *Catalog) Selected() string {
 	if c.flag != "" {
 		return c.flag
@@ -131,7 +138,7 @@ func (c *Catalog) Selected() string {
 	return c.project
 }
 
-// Isolated reports that /models must not write ~/.co.yaml.
+// Isolated reports that /models must not write ~/.co/config.yaml.
 func (c *Catalog) Isolated() bool {
 	return c.isolated
 }
@@ -221,15 +228,14 @@ func (c *Catalog) SaveKey(id, key string) error {
 	if key == "" {
 		return fmt.Errorf("api key is empty")
 	}
-	home := filepath.Dir(c.homeFile)
-	if err := storeKey(home, id, key); err != nil {
+	if err := storeKey(c.homeDir, id, key); err != nil {
 		return err
 	}
 	c.keys[id] = key
 	return nil
 }
 
-// SaveSelection writes the model key in ~/.co.yaml.
+// SaveSelection writes the model key in ~/.co/config.yaml.
 // An isolated catalog leaves that file alone.
 func (c *Catalog) SaveSelection(model string) error {
 	if c.isolated {

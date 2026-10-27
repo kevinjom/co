@@ -36,7 +36,7 @@ func TestParse(t *testing.T) {
 func TestMergePrecedence(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
-	writeYAML(t, filepath.Join(home, ".co.yaml"), `
+	writeYAML(t, HomeConfig(home), `
 model: ollama/from-home
 log-level: debug
 providers:
@@ -121,7 +121,7 @@ providers:
 func TestHomeModelWinsOverProject(t *testing.T) {
 	home := t.TempDir()
 	project := t.TempDir()
-	writeYAML(t, filepath.Join(home, ".co.yaml"), "model: ollama/home\n")
+	writeYAML(t, HomeConfig(home), "model: ollama/home\n")
 	writeYAML(t, filepath.Join(project, ".co.yaml"), "model: ollama/project\n")
 	cat, err := Load(LoadOptions{Home: home, ProjectDir: project})
 	if err != nil {
@@ -134,7 +134,7 @@ func TestHomeModelWinsOverProject(t *testing.T) {
 
 func TestExplicitOllamaModelsReplaceLiveList(t *testing.T) {
 	home := t.TempDir()
-	writeYAML(t, filepath.Join(home, ".co.yaml"), `
+	writeYAML(t, HomeConfig(home), `
 providers:
   ollama:
     models:
@@ -163,7 +163,7 @@ providers:
 
 func TestKeyFileLosesToEnv(t *testing.T) {
 	home := t.TempDir()
-	writeYAML(t, filepath.Join(home, ".co.yaml"), `
+	writeYAML(t, HomeConfig(home), `
 providers:
   openrouter:
     base_url: https://openrouter.ai/api/v1
@@ -227,7 +227,7 @@ providers:
 
 func TestSaveSelectionPreservesOtherKeys(t *testing.T) {
 	home := t.TempDir()
-	path := filepath.Join(home, ".co.yaml")
+	path := HomeConfig(home)
 	writeYAML(t, path, "# keep me\nlog-level: debug\n")
 	cat, err := Load(LoadOptions{Home: home, ProjectDir: t.TempDir()})
 	if err != nil {
@@ -269,7 +269,7 @@ providers:
     models:
       - qwen
 `)
-	writeYAML(t, filepath.Join(home, ".co.yaml"), "model: ollama/from-home\n")
+	writeYAML(t, HomeConfig(home), "model: ollama/from-home\n")
 	cat, err := Load(LoadOptions{Home: home, ConfigFile: file})
 	if err != nil {
 		t.Fatal(err)
@@ -283,7 +283,7 @@ providers:
 	if err := cat.SaveSelection("ollama/changed"); err != nil {
 		t.Fatal(err)
 	}
-	homeData, err := os.ReadFile(filepath.Join(home, ".co.yaml"))
+	homeData, err := os.ReadFile(HomeConfig(home))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,6 +294,9 @@ providers:
 
 func writeYAML(t *testing.T, path, body string) {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

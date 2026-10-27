@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"co/internal/command"
@@ -30,7 +31,7 @@ func newRootCmd() (*cobra.Command, error) {
 		RunE: run,
 	}
 
-	cmd.PersistentFlags().String("config", "", "config file (default $HOME/.co.yaml)")
+	cmd.PersistentFlags().String("config", "", "config file (default $HOME/.co/config.yaml)")
 	cmd.PersistentFlags().String("log-level", "info", "log level (debug, info, warn, error)")
 	cmd.Flags().String("host", defaultHost, "Ollama host")
 	cmd.Flags().String("model", "", "model as provider/model-id")
@@ -79,10 +80,9 @@ func initConfig(cmd *cobra.Command) error {
 		if err != nil {
 			return fmt.Errorf("finding home directory: %w", err)
 		}
-		viper.AddConfigPath(home)
-		viper.AddConfigPath(".")
-		viper.SetConfigName(".co")
-		viper.SetConfigType("yaml")
+		if err := setDefaultConfig(home); err != nil {
+			return err
+		}
 	}
 
 	viper.SetEnvPrefix("CO")
@@ -116,6 +116,29 @@ func initConfig(cmd *cobra.Command) error {
 	}
 	handler := slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: level})
 	slog.SetDefault(slog.New(handler))
+	return nil
+}
+
+// setDefaultConfig prefers ~/.co/config.yaml and otherwise uses ./.co.yaml.
+func setDefaultConfig(home string) error {
+	candidates := []string{
+		provider.HomeConfig(home),
+		filepath.Join(".", ".co.yaml"),
+	}
+	for _, path := range candidates {
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("reading config: %w", err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		viper.SetConfigFile(path)
+		return nil
+	}
 	return nil
 }
 
@@ -185,7 +208,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	interactive := isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout())
 	if model := cat.Selected(); model == "" {
 		if !interactive {
-			return usageError(fmt.Errorf("model is required: set --model as provider/model-id, or set model in ~/.co.yaml"))
+			return usageError(fmt.Errorf("model is required: set --model as provider/model-id, or set model in ~/.co/config.yaml"))
 		}
 	} else if err := app.Activate(signals.ctx, model); err != nil {
 		if sigErr := signals.err(); sigErr != nil {

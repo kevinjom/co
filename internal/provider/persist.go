@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -11,6 +12,9 @@ import (
 // saveModelKey sets the model field and leaves every other key in place.
 // A missing file is created with only that field.
 func saveModelKey(path, model string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("writing config %s: %w", path, err)
+	}
 	doc, mode, err := loadYAML(path)
 	if err != nil {
 		return err

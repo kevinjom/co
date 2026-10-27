@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 
+	"co/internal/provider"
+
 	"github.com/spf13/viper"
 )
 
@@ -361,7 +363,7 @@ func TestSlashModelsSwitchesAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".co.yaml"))
+	data, err := os.ReadFile(provider.HomeConfig(home))
 	if err != nil {
 		t.Fatal(err)
 	}

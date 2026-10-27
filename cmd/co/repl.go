@@ -68,7 +68,7 @@ func lineRepl(cmd *cobra.Command, signals *signalSession, app *command.App) erro
 
 		session := app.Session()
 		if session == nil {
-			return usageError(fmt.Errorf("model is required: set --model as provider/model-id, or set model in ~/.co.yaml"))
+			return usageError(fmt.Errorf("model is required: set --model as provider/model-id, or set model in ~/.co/config.yaml"))
 		}
 
 		wrote := false

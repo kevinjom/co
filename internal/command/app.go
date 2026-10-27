@@ -54,7 +54,7 @@ func (a *App) Models(ctx context.Context) ([]string, error) {
 	return a.cat.List(ctx)
 }
 
-// Activate selects a model for startup and does not write ~/.co.yaml.
+// Activate selects a model for startup and does not write ~/.co/config.yaml.
 func (a *App) Activate(ctx context.Context, raw string) error {
 	return a.use(ctx, raw, false)
 }

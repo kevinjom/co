@@ -125,24 +125,7 @@ func (m apiMessage) message() Message {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, payload any, dest any) error {
-	var body io.Reader
-	if payload != nil {
-		encoded, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("encoding request: %w", err)
-		}
-		body = bytes.NewReader(encoded)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
-	if err != nil {
-		return fmt.Errorf("building request: %w", err)
-	}
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.http.Do(req)
+	resp, err := c.send(ctx, method, path, payload)
 	if err != nil {
 		return err
 	}
@@ -152,9 +135,6 @@ func (c *Client) do(ctx context.Context, method, path string, payload any, dest 
 	if err != nil {
 		return fmt.Errorf("reading response: %w", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: status %d: %s", path, resp.StatusCode, bytes.TrimSpace(respBody))
-	}
 	if dest == nil || len(bytes.TrimSpace(respBody)) == 0 {
 		return nil
 	}
@@ -162,4 +142,39 @@ func (c *Client) do(ctx context.Context, method, path string, payload any, dest 
 		return fmt.Errorf("decoding response: %w", err)
 	}
 	return nil
+}
+
+// send performs one request. A non-200 response is an error and the body is closed.
+// On success the caller closes the body.
+func (c *Client) send(ctx context.Context, method, path string, payload any) (*http.Response, error) {
+	var body io.Reader
+	if payload != nil {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("encoding request: %w", err)
+		}
+		body = bytes.NewReader(encoded)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	if err != nil {
+		return nil, fmt.Errorf("building request: %w", err)
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+		if err != nil {
+			return nil, fmt.Errorf("reading response: %w", err)
+		}
+		return nil, fmt.Errorf("%s: status %d: %s", path, resp.StatusCode, bytes.TrimSpace(respBody))
+	}
+	return resp, nil
 }

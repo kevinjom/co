@@ -279,6 +279,7 @@ func (m *model) onPaste(text string) (tea.Model, tea.Cmd) {
 		if m.busy {
 			return m, nil
 		}
+		m.stopComplete()
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(tea.PasteMsg{Content: text})
 		m.layout()
@@ -347,7 +348,7 @@ func (m *model) inputView() string {
 func (m *model) overlayView() string {
 	switch m.mode {
 	case modeChat:
-		return ""
+		return m.commandOverlay()
 	case modeModels:
 		return m.modelsOverlay()
 	case modeConnect:
@@ -373,19 +374,26 @@ func (m *model) modelsOverlay() string {
 	case len(ids) == 0:
 		lines = append(lines, m.theme.dim.Render("no matching model"))
 	default:
-		start, view := pickerWindowSlice(ids, m.cursor)
-		for i, id := range view {
-			idx := start + i
-			if idx == m.cursor {
-				line := ansi.Truncate("> "+id, width, "…")
-				lines = append(lines, m.theme.accent.Render(line))
-				continue
-			}
-			line := ansi.Truncate("  "+id, width, "…")
-			lines = append(lines, m.theme.dim.Render(line))
-		}
+		lines = append(lines, m.choiceLines(ids, m.cursor)...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *model) choiceLines(ids []string, cursor int) []string {
+	width := m.usableWidth()
+	start, view := pickerWindowSlice(ids, cursor)
+	lines := make([]string, 0, len(view))
+	for i, id := range view {
+		prefix := "  "
+		style := m.theme.dim
+		if start+i == cursor {
+			prefix = "> "
+			style = m.theme.accent
+		}
+		line := ansi.Truncate(prefix+id, width, "…")
+		lines = append(lines, style.Render(line))
+	}
+	return lines
 }
 
 func pickerWindowSlice(ids []string, cursor int) (int, []string) {

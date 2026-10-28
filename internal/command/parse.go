@@ -24,6 +24,15 @@ type Parsed struct {
 	Err  error
 }
 
+const (
+	cmdModels  = "/models"
+	cmdConnect = "/connect"
+)
+
+func slashCommands() []string {
+	return []string{cmdModels, cmdConnect}
+}
+
 // Parse classifies a line before it can become a chat turn.
 // /models and /models <provider>/<model-id> select a model.
 // /connect <provider> stores a key. exit and quit leave the session.
@@ -40,9 +49,9 @@ func Parse(line string) Parsed {
 	name, arg, _ := strings.Cut(line, " ")
 	arg = strings.TrimSpace(arg)
 	switch name {
-	case "/models":
+	case cmdModels:
 		return Parsed{Kind: KindModels, Arg: arg}
-	case "/connect":
+	case cmdConnect:
 		if arg == "" || strings.ContainsAny(arg, " \t") {
 			return Parsed{Kind: KindError, Err: errors.New("usage: /connect <provider>")}
 		}

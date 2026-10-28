@@ -380,6 +380,70 @@ func TestModelsCommandDoesNotStartATurn(t *testing.T) {
 	}
 }
 
+func TestTabCompletesSlashCommands(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("/")
+	m.layout()
+	plain := ansi.Strip(m.View().Content)
+	if !strings.Contains(plain, "> /models") || !strings.Contains(plain, "  /connect") || !strings.Contains(plain, "up/down move") {
+		t.Fatalf("suggestions %q", plain)
+	}
+	if h := lipgloss.Height(m.View().Content); h != 24 {
+		t.Fatalf("height %d\n%s", h, plain)
+	}
+
+	updated, _ := m.Update(press(tea.KeyDown, 0))
+	got := updated.(*model)
+	if got.input.Value() != "/" {
+		t.Fatalf("filter %q", got.input.Value())
+	}
+	plain = ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "> /connect") || !strings.Contains(plain, "  /models") {
+		t.Fatalf("moved %q", plain)
+	}
+
+	updated, _ = got.Update(press(tea.KeyTab, 0))
+	got = updated.(*model)
+	if got.input.Value() != "/connect" {
+		t.Fatalf("value %q", got.input.Value())
+	}
+	if plain = ansi.Strip(got.View().Content); strings.Contains(plain, "> /connect") {
+		t.Fatalf("list lingered: %q", plain)
+	}
+
+	got.input.Focus()
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	got = updated.(*model)
+	if got.input.Value() != "/connectx" {
+		t.Fatalf("typed %q", got.input.Value())
+	}
+}
+
+func TestTabCompletesUniqueCommand(t *testing.T) {
+	m := newTestModel(t)
+	m.input.SetValue("/c")
+	m.layout()
+	if plain := ansi.Strip(m.View().Content); !strings.Contains(plain, "/connect") {
+		t.Fatalf("hint %q", plain)
+	}
+	updated, _ := m.Update(press(tea.KeyTab, 0))
+	got := updated.(*model)
+	if got.input.Value() != "/connect" {
+		t.Fatalf("value %q", got.input.Value())
+	}
+	if plain := ansi.Strip(got.View().Content); strings.Contains(plain, "tab complete") {
+		t.Fatalf("hint lingered: %q", plain)
+	}
+
+	m = newTestModel(t)
+	m.input.SetValue("hello")
+	updated, _ = m.Update(press(tea.KeyTab, 0))
+	got = updated.(*model)
+	if got.input.Value() != "hello" {
+		t.Fatalf("plain text %q", got.input.Value())
+	}
+}
+
 func TestUnknownCommandIsNotATurn(t *testing.T) {
 	m := newTestModel(t)
 	m.input.SetValue("/nope")

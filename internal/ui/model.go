@@ -78,13 +78,14 @@ type model struct {
 	startup   bool
 	pending   bool
 
-	filter       string
-	cursor       int
-	modelIDs     []string
-	modelsLoaded bool
-	pickerErr    string
-	connectID    string
-	secret       string
+	filter        string
+	cursor        int
+	modelIDs      []string
+	modelsLoaded  bool
+	pickerErr     string
+	connectID     string
+	secret        string
+	completeIndex int
 
 	theme    theme
 	input    textarea.Model
@@ -307,23 +308,91 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "pgdown":
 		m.viewport.PageDown()
 		return m, nil
+	case "up":
+		if m.moveCommand(-1) {
+			return m, nil
+		}
+	case "down":
+		if m.moveCommand(1) {
+			return m, nil
+		}
 	case "enter", "ctrl+m":
 		if m.busy {
 			return m, nil
 		}
+		m.acceptCommand()
 		return m, m.submit()
+	case "tab":
+		return m.completeCommand()
 	}
 
 	if m.busy {
 		return m, nil
 	}
+	m.stopComplete()
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.layout()
 	return m, cmd
 }
 
+func (m *model) moveCommand(delta int) bool {
+	if m.busy {
+		return false
+	}
+	done := command.Complete(m.input.Value(), m.completeIndex)
+	if done.Value == "" {
+		return false
+	}
+	next := done.Index + delta
+	if next < 0 || next >= len(done.Matches) {
+		return true
+	}
+	m.completeIndex = next
+	m.layout()
+	return true
+}
+
+func (m *model) completeCommand() (tea.Model, tea.Cmd) {
+	if m.busy || !m.acceptCommand() {
+		return m, nil
+	}
+	m.layout()
+	return m, nil
+}
+
+func (m *model) acceptCommand() bool {
+	value := m.input.Value()
+	atEnd := m.input.Line() == 0 && !strings.Contains(value, "\n") && m.input.Column() == len([]rune(value))
+	if !atEnd {
+		return false
+	}
+	done := command.Complete(value, m.completeIndex)
+	if done.Value == "" {
+		return false
+	}
+	m.input.SetValue(done.Value)
+	m.completeIndex = 0
+	return true
+}
+
+func (m *model) stopComplete() {
+	m.completeIndex = 0
+}
+
+func (m *model) commandOverlay() string {
+	if m.mode != modeChat || m.busy {
+		return ""
+	}
+	done := command.Complete(m.input.Value(), m.completeIndex)
+	if done.Value == "" {
+		return ""
+	}
+	return strings.Join(m.choiceLines(done.Matches, done.Index), "\n")
+}
+
 func (m *model) submit() tea.Cmd {
+	m.stopComplete()
 	text := strings.TrimSpace(m.input.Value())
 	if text == "" {
 		return nil

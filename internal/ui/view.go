@@ -138,6 +138,8 @@ func (m *model) helpLine() string {
 		text = "enter select  ·  esc close  ·  up/down move"
 	case m.mode == modeConnect:
 		text = "enter save  ·  esc cancel"
+	case m.commandOverlay() != "":
+		text = "up/down move  ·  tab complete  ·  enter select"
 	}
 	width := m.usableWidth()
 	if width > 0 && lipgloss.Width(text) > width {

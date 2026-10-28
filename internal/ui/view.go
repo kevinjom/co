@@ -14,34 +14,57 @@ import (
 type theme struct {
 	dark        bool
 	accent      lipgloss.Style
+	warn        lipgloss.Style
+	good        lipgloss.Style
 	dim         lipgloss.Style
 	bad         lipgloss.Style
 	accentColor color.Color
+	warnColor   color.Color
 	blurBorder  color.Color
 	faint       color.Color
+	textHex     string
+	accentHex   string
+	warnHex     string
+	faintHex    string
+	codeHex     string
 }
 
 func newTheme(dark bool) theme {
-	accent := pickColor(dark, "#0F766E", "#5EEAD4")
-	faint := pickColor(dark, "#71717A", "#A1A1AA")
-	bad := pickColor(dark, "#BE123C", "#FB7185")
-	blur := pickColor(dark, "#D4D4D8", "#3F3F46")
+	accentHex := pickHex(dark, "#0F766E", "#5EEAD4")
+	warnHex := pickHex(dark, "#B45309", "#FBBF24")
+	goodHex := pickHex(dark, "#15803D", "#86EFAC")
+	badHex := pickHex(dark, "#BE123C", "#FB7185")
+	faintHex := pickHex(dark, "#71717A", "#A1A1AA")
+	textHex := pickHex(dark, "#18181B", "#E4E4E7")
+	codeHex := pickHex(dark, "#C2410C", "#FDBA74")
+	blurHex := pickHex(dark, "#D4D4D8", "#3F3F46")
+	accent := lipgloss.Color(accentHex)
+	warn := lipgloss.Color(warnHex)
+	faint := lipgloss.Color(faintHex)
 	return theme{
 		dark:        dark,
 		accent:      lipgloss.NewStyle().Foreground(accent),
+		warn:        lipgloss.NewStyle().Foreground(warn),
+		good:        lipgloss.NewStyle().Foreground(lipgloss.Color(goodHex)),
 		dim:         lipgloss.NewStyle().Foreground(faint),
-		bad:         lipgloss.NewStyle().Foreground(bad),
+		bad:         lipgloss.NewStyle().Foreground(lipgloss.Color(badHex)),
 		accentColor: accent,
-		blurBorder:  blur,
+		warnColor:   warn,
+		blurBorder:  lipgloss.Color(blurHex),
 		faint:       faint,
+		textHex:     textHex,
+		accentHex:   accentHex,
+		warnHex:     warnHex,
+		faintHex:    faintHex,
+		codeHex:     codeHex,
 	}
 }
 
-func pickColor(dark bool, light, night string) color.Color {
+func pickHex(dark bool, light, night string) string {
 	if dark {
-		return lipgloss.Color(night)
+		return night
 	}
-	return lipgloss.Color(light)
+	return light
 }
 
 func styleInput(ta *textarea.Model, th theme) {
@@ -67,7 +90,12 @@ func (m *model) headerLine() string {
 	}
 	left := m.theme.accent.Render("co") + m.theme.dim.Render("  "+label)
 	right := m.theme.dim.Render(shortPath(m.cwd))
-	return joinSides(m.usableWidth(), left, right)
+	width := m.usableWidth()
+	line := joinSides(width, left, right)
+	if width < 1 {
+		return line
+	}
+	return line + "\n" + m.theme.dim.Render(strings.Repeat("─", width))
 }
 
 func (m *model) statusLine() string {
@@ -78,7 +106,14 @@ func (m *model) statusLine() string {
 		if label == "" {
 			label = "thinking"
 		}
-		left = m.spin.View() + label
+		style := m.theme.accent
+		ink := m.theme.accentColor
+		if label == "thinking" {
+			style = m.theme.warn
+			ink = m.theme.warnColor
+		}
+		m.spin.Style = lipgloss.NewStyle().Foreground(ink)
+		left = m.spin.View() + style.Render(label)
 	case m.mode == modeModels:
 		left = m.theme.dim.Render("choose a model")
 	case m.mode == modeConnect:
@@ -118,7 +153,7 @@ func (m *model) renderTranscript() string {
 	}
 	parts := make([]string, len(m.blocks))
 	for i, block := range m.blocks {
-		parts[i] = renderBlock(block, width, m.theme)
+		parts[i] = m.renderBlock(block, width)
 	}
 	return strings.Join(parts, "\n\n") + "\n"
 }
@@ -128,28 +163,121 @@ func renderWelcome(width int, th theme) string {
 	return th.dim.Render(wrapText(text, width))
 }
 
-func renderBlock(block block, width int, th theme) string {
+func (m *model) renderBlock(block block, width int) string {
+	th := m.theme
+	var out string
 	switch block.kind {
 	case blockUser:
-		return hang(th.accent.Render("❯ "), block.text, width)
+		out = renderUser(block.text, width, th)
 	case blockTool:
-		detail := strings.TrimPrefix(block.text, "tool ")
-		line := hang("· ", detail, width)
-		if block.failed {
-			return th.bad.Render(line)
-		}
-		return th.dim.Render(line)
+		out = renderTool(block, width, th)
 	case blockAssistant:
-		return wrapText(strings.TrimRight(block.text, "\n"), width)
+		out = renderInset(m.md.render(th, block.text, insetWidth(width), false), width)
 	case blockReasoning:
-		return th.dim.Render(wrapText(strings.TrimRight(block.text, "\n"), width))
+		out = renderReasoning(m.md.render(th, block.text, insetWidth(width), true), width, th)
 	case blockError:
-		return th.bad.Render(wrapText(block.text, width))
+		out = renderError(block.text, width, th)
 	case blockNote:
-		return th.dim.Render(block.text)
+		out = renderInset(th.dim.Render(hang("· ", block.text, insetWidth(width))), width)
 	default:
 		panic(fmt.Sprintf("unknown block kind %d", block.kind))
 	}
+	return clampWidth(out, width)
+}
+
+func renderUser(text string, width int, th theme) string {
+	bar := th.accent.Render("┃ ")
+	inner := width - lipgloss.Width(bar)
+	if inner < 1 {
+		inner = 1
+	}
+	body := hang(th.accent.Bold(true).Render("❯ "), text, inner)
+	return prefixLines(body, bar)
+}
+
+func renderReasoning(body string, width int, th theme) string {
+	label := th.warn.Bold(true).Render("thinking")
+	if body == "" {
+		return renderInset(label, width)
+	}
+	return renderInset(label+"\n"+body, width)
+}
+
+func renderTool(block block, width int, th theme) string {
+	return renderInset(clampWidth(toolLine(block, th), insetWidth(width)), width)
+}
+
+func toolLine(block block, th theme) string {
+	glyph := "→"
+	mark := th.accent
+	name := th.accent.Bold(true)
+	detail := th.dim
+	switch {
+	case block.failed:
+		glyph = "✗"
+		mark = th.bad
+		name = th.bad.Bold(true)
+		detail = th.bad
+	case block.done:
+		glyph = "✓"
+		mark = th.good
+		name = th.dim
+		detail = th.dim
+	}
+	line := mark.Render(glyph) + " " + name.Render(toolLabel(block.tool))
+	if strings.TrimSpace(block.detail) != "" {
+		line += "  " + detail.Render(block.detail)
+	}
+	return line
+}
+
+func toolLabel(name string) string {
+	switch name {
+	case "list_dir":
+		return "List"
+	case "read_file":
+		return "Read"
+	case "grep":
+		return "Grep"
+	default:
+		if name == "" {
+			return "tool"
+		}
+		return name
+	}
+}
+
+func renderError(text string, width int, th theme) string {
+	bar := th.bad.Render("┃ ")
+	inner := width - lipgloss.Width(bar)
+	if inner < 1 {
+		inner = 1
+	}
+	return prefixLines(th.bad.Render(wrapText(text, inner)), bar)
+}
+
+func renderInset(text string, width int) string {
+	return prefixLines(text, strings.Repeat(" ", inset))
+}
+
+const inset = 2
+
+func insetWidth(width int) int {
+	if width-inset < 1 {
+		return 1
+	}
+	return width - inset
+}
+
+func prefixLines(text, prefix string) string {
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	for i := range lines {
+		lines[i] = prefix + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func hang(prefix, text string, width int) string {

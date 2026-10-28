@@ -37,8 +37,11 @@ const (
 type block struct {
 	kind   blockKind
 	text   string
+	tool   string
+	detail string
 	toolID string
 	failed bool
+	done   bool
 }
 
 type eventMsg struct {
@@ -86,6 +89,7 @@ type model struct {
 	input    textarea.Model
 	viewport viewport.Model
 	spin     spinner.Model
+	md       markdownCache
 
 	width  int
 	height int
@@ -416,10 +420,11 @@ func (m *model) applyEvent(msg eventMsg) bool {
 	case agent.ToolStart:
 		m.answerOpen = false
 		m.reasoningOpen = false
-		m.status = strings.TrimSpace(ev.Name + " " + ev.Detail)
+		m.status = strings.TrimSpace(toolLabel(ev.Name) + " " + ev.Detail)
 		m.addBlock(block{
 			kind:   blockTool,
-			text:   "tool " + ev.Name + " " + ev.Detail,
+			tool:   ev.Name,
+			detail: ev.Detail,
 			toolID: ev.ID,
 		})
 	case agent.ToolDone:
@@ -456,12 +461,10 @@ func (m *model) appendReasoning(text string) {
 }
 
 func (m *model) markTool(ev agent.ToolDone) {
-	if ev.Err == nil {
-		return
-	}
 	for i := range m.blocks {
 		if m.blocks[i].kind == blockTool && m.blocks[i].toolID == ev.ID {
-			m.blocks[i].failed = true
+			m.blocks[i].done = true
+			m.blocks[i].failed = ev.Err != nil
 			return
 		}
 	}
@@ -524,7 +527,7 @@ func (m *model) layout() {
 	if extra := m.overlayView(); extra != "" {
 		overlayH = lipgloss.Height(extra)
 	}
-	const chrome = 3 // header, status, help
+	const chrome = 4 // header, rule, status, help
 	vpH := height - chrome - inputH - overlayH
 	if vpH < 1 {
 		vpH = 1

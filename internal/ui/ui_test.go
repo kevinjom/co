@@ -122,9 +122,9 @@ func TestTurnMessagesAppendInOrder(t *testing.T) {
 		t.Fatal("still busy")
 	}
 	plain := ansi.Strip(got.renderTranscript())
-	toolAt := strings.Index(plain, "list_dir path=.")
+	toolAt := strings.Index(plain, "List")
 	answerAt := strings.Index(plain, "two files")
-	if toolAt < 0 || answerAt < 0 || toolAt > answerAt {
+	if toolAt < 0 || answerAt < 0 || toolAt > answerAt || !strings.Contains(plain, "path=.") {
 		t.Fatalf("transcript %q", plain)
 	}
 }
@@ -184,11 +184,11 @@ func TestToolErrorMarksTheLine(t *testing.T) {
 	m.events = make(chan tea.Msg)
 	m.Update(eventMsg{id: 1, event: agent.ToolStart{ID: "call_1", Name: "read_file", Detail: "path=missing"}})
 	m.Update(eventMsg{id: 1, event: agent.ToolDone{ID: "call_1", Err: errors.New("missing")}})
-	if len(m.blocks) != 1 || !m.blocks[0].failed {
+	if len(m.blocks) != 1 || !m.blocks[0].failed || !m.blocks[0].done {
 		t.Fatalf("blocks %+v", m.blocks)
 	}
 	plain := ansi.Strip(m.renderTranscript())
-	if !strings.Contains(plain, "read_file path=missing") {
+	if !strings.Contains(plain, "Read") || !strings.Contains(plain, "path=missing") {
 		t.Fatalf("transcript %q", plain)
 	}
 }
@@ -262,6 +262,57 @@ func TestShortPathUsesHome(t *testing.T) {
 	}
 	if got := shortPath(home + "/src"); got != "~/src" {
 		t.Fatalf("child %q", got)
+	}
+}
+
+func TestAssistantMarkdownRenders(t *testing.T) {
+	m := newTestModel(t)
+	m.blocks = []block{{
+		kind: blockAssistant,
+		text: "# Title\n\nRun `go test` and **bold**.\n\n```go\nfunc main() {}\n```",
+	}}
+	raw := m.renderTranscript()
+	plain := ansi.Strip(raw)
+	for _, gone := range []string{"# Title", "**bold**", "`go test`", "```"} {
+		if strings.Contains(plain, gone) {
+			t.Fatalf("raw markdown %q left in %q", gone, plain)
+		}
+	}
+	for _, want := range []string{"Title", "go test", "bold", "func main() {}"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("missing %q in %q", want, plain)
+		}
+	}
+	if raw == plain {
+		t.Fatal("markdown rendered without color")
+	}
+	if w := lipgloss.Width(raw); w > 80 {
+		t.Fatalf("width %d", w)
+	}
+}
+
+func TestTranscriptKindsStayDistinct(t *testing.T) {
+	m := newTestModel(t)
+	m.blocks = []block{
+		{kind: blockUser, text: "how many lines?"},
+		{kind: blockReasoning, text: "Count the files."},
+		{kind: blockTool, tool: "list_dir", detail: "path=."},
+		{kind: blockTool, tool: "read_file", detail: "path=missing", failed: true, done: true},
+		{kind: blockError, text: "something failed"},
+		{kind: blockNote, text: "interrupted"},
+	}
+	plain := ansi.Strip(m.renderTranscript())
+	for _, want := range []string{"❯ how many lines?", "thinking", "Count the files.", "List", "path=.", "Read", "path=missing", "something failed", "interrupted"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("missing %q in %q", want, plain)
+		}
+	}
+	raw := m.renderTranscript()
+	if lipgloss.Width(raw) > 80 {
+		t.Fatalf("width %d\n%s", lipgloss.Width(raw), plain)
+	}
+	if raw == ansi.Strip(raw) {
+		t.Fatal("transcript has no color")
 	}
 }
 

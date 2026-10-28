@@ -65,12 +65,14 @@ func prepare(t *testing.T) {
 	t.Setenv("OLLAMA_HOST", "")
 	t.Setenv("CO_LOG_LEVEL", "")
 	t.Setenv("CO_NO_HISTORY", "")
+	t.Setenv("CO_RESUME", "")
 	t.Chdir(t.TempDir())
 	viper.Reset()
 }
 
 func startCLI(t *testing.T, stdin string, args ...string) (string, string, error) {
 	t.Helper()
+	viper.Reset()
 	cmd, err := newRootCmd()
 	if err != nil {
 		t.Fatal(err)
@@ -196,6 +198,9 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 	if strings.Contains(stdout, "tool ") {
 		t.Fatalf("tool trace leaked to stdout %q", stdout)
 	}
+	if strings.Contains(stderr, "resume with:") {
+		t.Fatalf("eof printed a resume hint: %q", stderr)
+	}
 	assertSessionRoles(t, "user", "assistant", "tool", "assistant")
 }
 
@@ -214,9 +219,9 @@ func TestNoHistoryWritesNothing(t *testing.T) {
 	defer server.Close()
 
 	prepare(t)
-	stdout, _, err := startCLI(
+	stdout, stderr, err := startCLI(
 		t,
-		"hi\n",
+		"hi\nexit\n",
 		"--host",
 		server.URL,
 		"--model",
@@ -228,6 +233,9 @@ func TestNoHistoryWritesNothing(t *testing.T) {
 	}
 	if stdout != "ok\n" {
 		t.Fatalf("stdout %q", stdout)
+	}
+	if strings.Contains(stderr, "resume with:") {
+		t.Fatalf("resume hint %q", stderr)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -389,6 +397,147 @@ func TestSlashModelsSwitchesAndPersists(t *testing.T) {
 	if !strings.Contains(text, `"type":"model"`) || !strings.Contains(text, `"model":"ollama/other"`) {
 		t.Fatalf("model record missing: %s", text)
 	}
+}
+
+func TestExitPrintsResumeAndContinueKeepsTheSession(t *testing.T) {
+	var mu sync.Mutex
+	var chats []struct {
+		Model    string
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models/test-model":
+			_, _ = io.WriteString(w, `{"id":"test-model"}`)
+		case "/v1/chat/completions":
+			var body struct {
+				Model    string `json:"model"`
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode: %v", err)
+				return
+			}
+			mu.Lock()
+			chats = append(chats, struct {
+				Model    string
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				}
+			}{Model: body.Model, Messages: body.Messages})
+			mu.Unlock()
+			writeSSE(w, contentChunk("ok"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	prepare(t)
+	_, stderr, err := startCLI(
+		t,
+		"hi\nexit\n",
+		"--host",
+		server.URL,
+		"--model",
+		"ollama/test-model",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := resumeHint(t, stderr)
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(provider.HomeConfig(home), []byte("model: ollama/other\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, err = startCLI(
+		t,
+		"again\nexit\n",
+		"--host",
+		server.URL,
+		"--resume",
+		"latest",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumeHint(t, stderr) != id {
+		t.Fatalf("second hint %q want %s", stderr, id)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(home, ".co", "projects", "*", "sessions", "*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || filepath.Base(matches[0]) != id+".jsonl" {
+		t.Fatalf("session files %v id %s", matches, id)
+	}
+	text, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(text), `"type":"session"`) != 1 || !strings.Contains(string(text), "again") {
+		t.Fatalf("transcript %s", text)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(chats) != 2 {
+		t.Fatalf("chats = %d", len(chats))
+	}
+	if chats[1].Model != "test-model" {
+		t.Fatalf("resumed model %q", chats[1].Model)
+	}
+	var sawHi, sawAgain bool
+	for _, msg := range chats[1].Messages {
+		if msg.Role == "user" && msg.Content == "hi" {
+			sawHi = true
+		}
+		if msg.Role == "user" && msg.Content == "again" {
+			sawAgain = true
+		}
+	}
+	if !sawHi || !sawAgain {
+		t.Fatalf("messages %+v", chats[1].Messages)
+	}
+}
+
+func TestResumeMissingSessionIsUsageError(t *testing.T) {
+	prepare(t)
+	_, stderr, err := startCLI(t, "", "--resume", "missing")
+	var exitErr *exitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(stderr, "Usage:") {
+		t.Fatalf("usage leaked %q", stderr)
+	}
+}
+
+func resumeHint(t *testing.T, stderr string) string {
+	t.Helper()
+	const prefix = "resume with: co --resume "
+	var id string
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			id = strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	if id == "" {
+		t.Fatalf("resume hint missing in %q", stderr)
+	}
+	return id
 }
 
 func assertSessionRoles(t *testing.T, roles ...string) {

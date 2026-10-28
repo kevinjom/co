@@ -112,6 +112,9 @@ func runLineCommand(cmd *cobra.Command, signals *signalSession, app *command.App
 	case command.KindChat:
 		return false, nil
 	case command.KindQuit:
+		if note := app.ExitNote(); note != "" {
+			fmt.Fprintln(stderr, note)
+		}
 		return true, errQuit
 	case command.KindError:
 		fmt.Fprintln(stderr, parsed.Err)

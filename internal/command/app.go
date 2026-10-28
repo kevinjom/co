@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"co/internal/agent"
 	"co/internal/openai"
@@ -89,6 +90,51 @@ func (a *App) RejectConnect(id string) error {
 	return fmt.Errorf("connect %s: run /connect in a terminal", id)
 }
 
+// Resume continues a saved session.
+// model overrides the transcript when it is non-empty.
+func (a *App) Resume(ctx context.Context, id, model string) error {
+	if a.session != nil {
+		return fmt.Errorf("session already started")
+	}
+	loaded, err := transcript.Resume(a.home, a.cwd, id)
+	if err != nil {
+		return err
+	}
+	selected := loaded.Model
+	if strings.TrimSpace(model) != "" {
+		selected = model
+	}
+	client, wire, ref, err := a.openClient(ctx, selected)
+	if err != nil {
+		_ = loaded.Writer.Close()
+		return err
+	}
+	var recorder agent.Recorder
+	if a.noHistory {
+		if err := loaded.Writer.Close(); err != nil {
+			slog.Warn("closing session history", "err", err)
+		}
+	} else {
+		a.history = loaded.Writer
+		recorder = loaded.Writer
+	}
+	a.session = agent.NewSession(client, wire, a.cwd, recorder)
+	a.session.Restore(loaded.Messages)
+	a.model = ref
+	if ref != loaded.Model {
+		a.noteModel(ref)
+	}
+	return nil
+}
+
+// ExitNote tells the user how to resume, when this process wrote a transcript.
+func (a *App) ExitNote() string {
+	if a.history == nil || !a.history.Persisted() {
+		return ""
+	}
+	return "resume with: co --resume " + a.history.ID()
+}
+
 // Close closes the session transcript.
 func (a *App) Close() {
 	if a.history == nil {
@@ -101,40 +147,48 @@ func (a *App) Close() {
 }
 
 func (a *App) use(ctx context.Context, raw string, persist bool) error {
-	ref, err := provider.Parse(raw)
+	client, wire, ref, err := a.openClient(ctx, raw)
 	if err != nil {
 		return err
-	}
-	ep, err := a.cat.Endpoint(ref)
-	if err != nil {
-		return err
-	}
-	client := openai.NewEndpoint(ep.BaseURL, ep.APIKey, ep.Compat)
-	if ep.Probe {
-		if err := client.Show(ctx, ep.Model); err != nil {
-			return fmt.Errorf("checking model %q: %w", ref.String(), err)
-		}
 	}
 	if persist {
-		if err := a.cat.SaveSelection(ref.String()); err != nil {
+		if err := a.cat.SaveSelection(ref); err != nil {
 			return err
 		}
 	}
 
 	if a.session == nil {
-		recorder, history := a.openHistory(ref.String())
+		recorder, history := a.openHistory(ref)
 		a.history = history
-		a.session = agent.NewSession(client, ep.Model, a.cwd, recorder)
-		a.model = ref.String()
+		a.session = agent.NewSession(client, wire, a.cwd, recorder)
+		a.model = ref
 		return nil
 	}
 
-	a.session.SetModel(client, ep.Model)
-	if a.model != ref.String() {
-		a.noteModel(ref.String())
+	a.session.SetModel(client, wire)
+	if a.model != ref {
+		a.noteModel(ref)
 	}
-	a.model = ref.String()
+	a.model = ref
 	return nil
+}
+
+func (a *App) openClient(ctx context.Context, raw string) (*openai.Client, string, string, error) {
+	ref, err := provider.Parse(raw)
+	if err != nil {
+		return nil, "", "", err
+	}
+	ep, err := a.cat.Endpoint(ref)
+	if err != nil {
+		return nil, "", "", err
+	}
+	client := openai.NewEndpoint(ep.BaseURL, ep.APIKey, ep.Compat)
+	if ep.Probe {
+		if err := client.Show(ctx, ep.Model); err != nil {
+			return nil, "", "", fmt.Errorf("checking model %q: %w", ref.String(), err)
+		}
+	}
+	return client, ep.Model, ref.String(), nil
 }
 
 func (a *App) openHistory(model string) (agent.Recorder, *transcript.Writer) {

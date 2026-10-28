@@ -17,4 +17,5 @@ type Director interface {
 	Model() string
 	Session() *agent.Session
 	Ready() bool
+	ExitNote() string
 }

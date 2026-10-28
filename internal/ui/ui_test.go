@@ -79,8 +79,8 @@ func TestExitQuits(t *testing.T) {
 	m := newTestModel(t)
 	m.input.SetValue("exit")
 	_, cmd := m.Update(press(tea.KeyEnter, 0))
-	if !m.quitting || cmd == nil {
-		t.Fatal("expected quit")
+	if !m.quitting || cmd == nil || !m.explainResume {
+		t.Fatal("expected quit that explains how to resume")
 	}
 	if m.View().Content != "" {
 		t.Fatal("quit view should be empty")
@@ -90,8 +90,8 @@ func TestExitQuits(t *testing.T) {
 func TestCtrlCQuitsWhenIdle(t *testing.T) {
 	m := newTestModel(t)
 	_, cmd := m.Update(press('c', tea.ModCtrl))
-	if !m.quitting || cmd == nil {
-		t.Fatal("expected quit")
+	if !m.quitting || cmd == nil || m.explainResume {
+		t.Fatal("expected quit without a resume hint")
 	}
 }
 
@@ -340,6 +340,7 @@ func (f *fakeDirector) Connect(string, string) error { return nil }
 func (f *fakeDirector) Model() string                { return f.picked }
 func (f *fakeDirector) Session() *agent.Session      { return f.session }
 func (f *fakeDirector) Ready() bool                  { return f.ready }
+func (f *fakeDirector) ExitNote() string             { return "" }
 
 func TestModelsCommandDoesNotStartATurn(t *testing.T) {
 	m := newTestModel(t)
@@ -421,6 +422,38 @@ func TestPasteFillsConnectKey(t *testing.T) {
 	}
 	if !strings.Contains(plain, strings.Repeat("•", len("sk-test-key"))) {
 		t.Fatalf("hidden key missing: %q", plain)
+	}
+}
+
+func TestResumeRendersPriorTurns(t *testing.T) {
+	dir := t.TempDir()
+	session := agent.NewSession(openai.New("http://127.0.0.1:1"), "test-model", dir, nil)
+	session.Restore([]openai.Message{
+		{Role: "user", Content: "how many lines?"},
+		{Role: "assistant", ToolCalls: []openai.ToolCall{{
+			ID:   "call-1",
+			Type: "function",
+			Function: openai.FunctionCall{
+				Name:      "list_dir",
+				Arguments: openai.Arguments{"path": "."},
+			},
+		}}},
+		{Role: "tool", Content: "a.go", ToolCallID: "call-1"},
+		{Role: "assistant", Content: "There are 3 lines."},
+	})
+	m := newModel(context.Background(), session, "test-model", dir)
+	m.width = 80
+	m.height = 24
+	m.layout()
+	m.paint()
+	plain := ansi.Strip(m.renderTranscript())
+	for _, want := range []string{"❯ how many lines?", "List", "path=.", "There are 3 lines."} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("missing %q in %q", want, plain)
+		}
+	}
+	if strings.Contains(plain, "Ask about this directory") {
+		t.Fatal("welcome replaced the resumed transcript")
 	}
 }
 

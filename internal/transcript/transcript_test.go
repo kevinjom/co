@@ -1,11 +1,14 @@
 package transcript
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"co/internal/openai"
 )
@@ -229,6 +232,269 @@ func TestRecordModelLeavesHeader(t *testing.T) {
 	}
 	if change.Type != "model" || change.V != 1 || change.Seq != 2 || change.Model != "openrouter/qwen/qwen3-coder" {
 		t.Fatalf("change %+v", change)
+	}
+}
+
+func TestResumeAppendsWithoutRewritingTheHeader(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	w, err := Open(home, dir, "ollama/first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := openai.Message{
+		Role: "assistant",
+		ToolCalls: []openai.ToolCall{{
+			ID:   "call_1",
+			Type: "function",
+			Function: openai.FunctionCall{
+				Name:      "list_dir",
+				Arguments: openai.Arguments{"path": "."},
+			},
+		}},
+	}
+	if err := w.Record(openai.Message{Role: "user", Content: "hi"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(call, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.RecordModel("openrouter/qwen/qwen3-coder"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Resume(home, dir, w.ID()+".jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Model != "openrouter/qwen/qwen3-coder" {
+		t.Fatalf("model %q", loaded.Model)
+	}
+	if loaded.Writer.model != "ollama/first" {
+		t.Fatalf("header model %q", loaded.Writer.model)
+	}
+	if len(loaded.Messages) != 2 || loaded.Messages[1].ToolCalls[0].Function.Name != "list_dir" {
+		t.Fatalf("messages %+v", loaded.Messages)
+	}
+	path, _ := loaded.Messages[1].ToolCalls[0].Function.Arguments["path"].(string)
+	if path != "." {
+		t.Fatalf("path %q", path)
+	}
+	if err := loaded.Writer.Record(openai.Message{Role: "user", Content: "next"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := loaded.Writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := readLines(t, w.path)
+	if len(lines) != 5 {
+		t.Fatalf("lines = %d", len(lines))
+	}
+	var headers int
+	for _, line := range lines {
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal([]byte(line), &kind); err != nil {
+			t.Fatal(err)
+		}
+		if kind.Type == "session" {
+			headers++
+		}
+	}
+	if headers != 1 {
+		t.Fatalf("headers = %d", headers)
+	}
+	var last struct {
+		Seq     int `json:"seq"`
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(lines[4]), &last); err != nil {
+		t.Fatal(err)
+	}
+	if last.Seq != 4 || last.Message.Content != "next" {
+		t.Fatalf("last %+v", last)
+	}
+}
+
+func TestResumeDropsATornTail(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	w, err := Open(home, dir, "ollama/first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(openai.Message{Role: "user", Content: "hi"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(w.path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(`{"type":"message","broken`); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Resume(home, dir, w.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loaded.Writer.Record(openai.Message{Role: "user", Content: "next"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := loaded.Writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(w.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("broken")) {
+		t.Fatalf("torn tail kept: %s", data)
+	}
+	lines := readLines(t, w.path)
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d file %s", len(lines), data)
+	}
+}
+
+func TestResumeLeavesACorruptLine(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	w, err := Open(home, dir, "ollama/first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(openai.Message{Role: "user", Content: "hi"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(openai.Message{Role: "assistant", Content: "ok"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	lines := readLines(t, w.path)
+	lines[1] = "not-json"
+	corrupt := []byte(strings.Join(lines, "\n") + "\n")
+	if err := os.WriteFile(w.path, corrupt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Resume(home, dir, w.ID()); err == nil {
+		t.Fatal("expected an error")
+	}
+	got, err := os.ReadFile(w.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, corrupt) {
+		t.Fatalf("file changed: %s", got)
+	}
+}
+
+func TestResumeLatestUsesTheNewestFile(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	older, err := Open(home, dir, "ollama/first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := older.Record(openai.Message{Role: "user", Content: "old"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := older.Close(); err != nil {
+		t.Fatal(err)
+	}
+	newer, err := Open(home, dir, "ollama/first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := newer.Record(openai.Message{Role: "user", Content: "new"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := newer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(older.path, past, past); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newer.path, time.Now(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Resume(home, dir, "latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loaded.Writer.Close()
+	if loaded.Writer.ID() != newer.ID() {
+		t.Fatalf("id %s want %s", loaded.Writer.ID(), newer.ID())
+	}
+	if len(loaded.Messages) != 1 || loaded.Messages[0].Content != "new" {
+		t.Fatalf("messages %+v", loaded.Messages)
+	}
+}
+
+func TestResumeRejectsBadInput(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	assertInput := func(id, want string) {
+		t.Helper()
+		_, err := Resume(home, dir, id)
+		var input *InputError
+		if !errors.As(err, &input) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("Resume %q err = %v", id, err)
+		}
+	}
+	assertInput("latest", "no session")
+	assertInput("../secret", "invalid session")
+	assertInput("missing", "not found")
+}
+
+func TestResumeRejectsADifferentDirectory(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	w, err := Open(home, dir, "ollama/first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(openai.Message{Role: "user", Content: "hi"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	lines := readLines(t, w.path)
+	var header map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
+		t.Fatal(err)
+	}
+	header["cwd"] = "/somewhere/else"
+	raw, err := json.Marshal(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := append(append(raw, '\n'), []byte(strings.Join(lines[1:], "\n")+"\n")...)
+	if err := os.WriteFile(w.path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Resume(home, dir, w.ID())
+	var input *InputError
+	if !errors.As(err, &input) || !strings.Contains(err.Error(), "belongs to") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

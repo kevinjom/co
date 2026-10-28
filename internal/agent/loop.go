@@ -72,6 +72,19 @@ func (s *Session) DropRecorder() {
 	s.recorder = nil
 }
 
+// Restore appends messages from an earlier run after the system prompt.
+// Those messages are not written again.
+func (s *Session) Restore(messages []openai.Message) {
+	s.messages = append(s.messages, messages...)
+}
+
+// Messages returns a copy of the conversation, including the system prompt.
+func (s *Session) Messages() []openai.Message {
+	out := make([]openai.Message, len(s.messages))
+	copy(out, s.messages)
+	return out
+}
+
 // Turn appends the user line and runs tools until the model answers.
 // On a model error the user line stays in the session.
 // When the turn is canceled after some text has arrived, that partial answer is kept too.
@@ -156,7 +169,7 @@ func (s *Session) runTools(ctx context.Context, calls []openai.ToolCall, observe
 		emit(observe, ToolStart{
 			ID:     call.ID,
 			Name:   call.Function.Name,
-			Detail: toolDetail(call),
+			Detail: ToolDetail(call),
 		})
 		result, toolErr := s.tools.Run(ctx, call.Function.Name, map[string]any(call.Function.Arguments))
 		emit(observe, ToolDone{ID: call.ID, Err: toolErr})
@@ -196,7 +209,8 @@ func toolDefinitions(set *tools.Set) []openai.Tool {
 	return defs
 }
 
-func toolDetail(call openai.ToolCall) string {
+// ToolDetail is the short argument summary shown for a tool call.
+func ToolDetail(call openai.ToolCall) string {
 	args := call.Function.Arguments
 	if args == nil {
 		args = openai.Arguments{}

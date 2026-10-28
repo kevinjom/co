@@ -10,6 +10,7 @@ import (
 
 	"co/internal/command"
 	"co/internal/provider"
+	"co/internal/transcript"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -35,6 +36,7 @@ func newRootCmd() (*cobra.Command, error) {
 	cmd.PersistentFlags().String("log-level", "info", "log level (debug, info, warn, error)")
 	cmd.Flags().String("host", defaultHost, "Ollama host")
 	cmd.Flags().String("model", "", "model as provider/model-id")
+	cmd.Flags().String("resume", "", "resume a session id, or latest")
 	cmd.Flags().Bool("no-history", false, "do not save the session transcript")
 
 	if err := bindFlag(cmd.PersistentFlags(), "config"); err != nil {
@@ -47,6 +49,9 @@ func newRootCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 	if err := bindFlag(cmd.Flags(), "model"); err != nil {
+		return nil, err
+	}
+	if err := bindFlag(cmd.Flags(), "resume"); err != nil {
 		return nil, err
 	}
 	if err := bindFlag(cmd.Flags(), "no-history"); err != nil {
@@ -96,6 +101,9 @@ func initConfig(cmd *cobra.Command) error {
 	}
 	if err := viper.BindEnv("log-level", "CO_LOG_LEVEL"); err != nil {
 		return fmt.Errorf("binding log-level: %w", err)
+	}
+	if err := viper.BindEnv("resume", "CO_RESUME"); err != nil {
+		return fmt.Errorf("binding resume: %w", err)
 	}
 	if err := viper.BindEnv("no-history", "CO_NO_HISTORY"); err != nil {
 		return fmt.Errorf("binding no-history: %w", err)
@@ -167,12 +175,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	flagModel := ""
-	if cmd.Flags().Changed("model") {
-		flagModel = viper.GetString("model")
-	} else if os.Getenv("CO_MODEL") != "" {
-		flagModel = os.Getenv("CO_MODEL")
-	}
+	flagModel := explicitModel(cmd)
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -205,8 +208,21 @@ func run(cmd *cobra.Command, _ []string) error {
 	app := command.New(cat, home, cwd, viper.GetBool("no-history"))
 	defer app.Close()
 
+	resumeID := strings.TrimSpace(viper.GetString("resume"))
 	interactive := isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout())
-	if model := cat.Selected(); model == "" {
+	if resumeID != "" {
+		if err := app.Resume(signals.ctx, resumeID, flagModel); err != nil {
+			if sigErr := signals.err(); sigErr != nil {
+				return sigErr
+			}
+			var parseErr *provider.ParseError
+			var inputErr *transcript.InputError
+			if errors.As(err, &parseErr) || errors.As(err, &inputErr) {
+				return usageError(err)
+			}
+			return err
+		}
+	} else if model := cat.Selected(); model == "" {
 		if !interactive {
 			return usageError(fmt.Errorf("model is required: set --model as provider/model-id, or set model in ~/.co/config.yaml"))
 		}
@@ -221,4 +237,11 @@ func run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	return repl(cmd, signals, app, cwd)
+}
+
+func explicitModel(cmd *cobra.Command) string {
+	if cmd.Flags().Changed("model") {
+		return strings.TrimSpace(viper.GetString("model"))
+	}
+	return strings.TrimSpace(os.Getenv("CO_MODEL"))
 }

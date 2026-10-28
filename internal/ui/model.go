@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -108,8 +109,9 @@ type model struct {
 	answerOpen    bool
 	reasoningOpen bool
 
-	quitting bool
-	exitErr  error
+	quitting      bool
+	explainResume bool
+	exitErr       error
 }
 
 func newModel(ctx context.Context, session *agent.Session, modelName, cwd string) *model {
@@ -132,9 +134,49 @@ func newModel(ctx context.Context, session *agent.Session, modelName, cwd string
 	m.viewport.SoftWrap = true
 	m.viewport.MouseWheelEnabled = false
 	m.spin.Style = lipgloss.NewStyle().Foreground(th.accentColor)
+	m.blocks = historyBlocks(session)
 	m.layout()
 	m.paint()
+	if len(m.blocks) > 0 {
+		m.viewport.GotoBottom()
+	}
 	return m
+}
+
+func historyBlocks(session *agent.Session) []block {
+	if session == nil {
+		return nil
+	}
+	var blocks []block
+	for _, msg := range session.Messages() {
+		switch msg.Role {
+		case "user":
+			blocks = append(blocks, block{kind: blockUser, text: msg.Content})
+		case "assistant":
+			if strings.TrimSpace(msg.Content) != "" {
+				blocks = append(blocks, block{kind: blockAssistant, text: msg.Content})
+			}
+			for _, call := range msg.ToolCalls {
+				blocks = append(blocks, block{
+					kind:   blockTool,
+					tool:   call.Function.Name,
+					detail: agent.ToolDetail(call),
+					toolID: call.ID,
+				})
+			}
+		case "tool":
+			if msg.ToolCallID == "" {
+				continue
+			}
+			for i := range blocks {
+				if blocks[i].kind == blockTool && !blocks[i].done && blocks[i].toolID == msg.ToolCallID {
+					blocks[i].done = true
+					break
+				}
+			}
+		}
+	}
+	return blocks
 }
 
 func newInput(th theme) textarea.Model {
@@ -289,6 +331,7 @@ func (m *model) submit() tea.Cmd {
 	parsed := command.Parse(text)
 	switch parsed.Kind {
 	case command.KindQuit:
+		m.explainResume = true
 		_, cmd := m.quit()
 		return cmd
 	case command.KindModels:
@@ -633,8 +676,22 @@ func Run(ctx context.Context, app Director, cwd string) error {
 		return err
 	}
 	ui, ok := final.(*model)
+	if ok {
+		ui.announceExit()
+	}
 	if ok && ui.exitErr != nil {
 		return ui.exitErr
 	}
 	return nil
+}
+
+func (m *model) announceExit() {
+	if !m.explainResume || m.director == nil {
+		return
+	}
+	note := m.director.ExitNote()
+	if note == "" {
+		return
+	}
+	fmt.Fprintln(os.Stderr, note)
 }

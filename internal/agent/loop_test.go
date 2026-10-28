@@ -556,3 +556,28 @@ func TestSetModelKeepsMessages(t *testing.T) {
 		t.Fatalf("messages %+v", second.seen[0])
 	}
 }
+
+func TestRestoreIsSentOnTheNextTurn(t *testing.T) {
+	rec := &memRecorder{}
+	chat := &scriptChat{}
+	session := NewSession(chat, "test-model", t.TempDir(), rec)
+	session.Restore([]openai.Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi"},
+	})
+	if rec.calls != 0 {
+		t.Fatalf("restore recorded %d messages", rec.calls)
+	}
+	if _, err := session.Turn(t.Context(), "next", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(chat.seen) != 1 || len(chat.seen[0]) != 4 {
+		t.Fatalf("history %+v", chat.seen)
+	}
+	if chat.seen[0][1].Content != "hello" || chat.seen[0][2].Content != "hi" || chat.seen[0][3].Content != "next" {
+		t.Fatalf("messages %+v", chat.seen[0])
+	}
+	if rec.calls != 2 {
+		t.Fatalf("recorded %d", rec.calls)
+	}
+}

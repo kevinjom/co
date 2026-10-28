@@ -1,4 +1,4 @@
-// Package transcript writes one session to a JSONL file.
+// Package transcript stores one session in a JSONL file.
 // Messages are appended when they are complete. Streaming deltas are not stored.
 package transcript
 
@@ -101,6 +101,27 @@ func resolveCwd(cwd string) (string, error) {
 // projectName is the absolute path with every separator replaced by "-".
 func projectName(abs string) string {
 	return strings.ReplaceAll(abs, string(os.PathSeparator), "-")
+}
+
+// ID is the session id, also the file name without .jsonl.
+func (w *Writer) ID() string {
+	if w == nil {
+		return ""
+	}
+	return w.id
+}
+
+// Persisted reports that the transcript file exists.
+// A writer that has not recorded anything yet is not persisted.
+func (w *Writer) Persisted() bool {
+	if w == nil {
+		return false
+	}
+	if w.file != nil {
+		return true
+	}
+	info, err := os.Stat(w.path)
+	return err == nil && !info.IsDir()
 }
 
 func newSessionID(now time.Time) (string, error) {

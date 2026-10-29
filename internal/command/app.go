@@ -49,8 +49,7 @@ func (a *App) Session() *agent.Session {
 	return a.session
 }
 
-// Models lists provider/model-id values.
-// A non-nil error may still come with ids from providers that could be listed.
+// Models lists configured provider/model-id values.
 func (a *App) Models(ctx context.Context) ([]string, error) {
 	return a.cat.List(ctx)
 }
@@ -174,6 +173,9 @@ func (a *App) use(ctx context.Context, raw string, persist bool) error {
 }
 
 func (a *App) openClient(ctx context.Context, raw string) (*openai.Client, string, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", "", err
+	}
 	ref, err := provider.Parse(raw)
 	if err != nil {
 		return nil, "", "", err
@@ -183,11 +185,6 @@ func (a *App) openClient(ctx context.Context, raw string) (*openai.Client, strin
 		return nil, "", "", err
 	}
 	client := openai.NewEndpoint(ep.BaseURL, ep.APIKey, ep.Compat)
-	if ep.Probe {
-		if err := client.Show(ctx, ep.Model); err != nil {
-			return nil, "", "", fmt.Errorf("checking model %q: %w", ref.String(), err)
-		}
-	}
 	return client, ep.Model, ref.String(), nil
 }
 

@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -60,8 +62,6 @@ func prepare(t *testing.T) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CO_MODEL", "")
-	t.Setenv("OLLAMA_MODEL", "")
-	t.Setenv("CO_HOST", "")
 	t.Setenv("OLLAMA_HOST", "")
 	t.Setenv("CO_LOG_LEVEL", "")
 	t.Setenv("CO_NO_HISTORY", "")
@@ -122,7 +122,6 @@ func TestMissingModelIsUsageError(t *testing.T) {
 
 func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 	var mu sync.Mutex
-	var sawModel string
 	var chats int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
@@ -131,16 +130,6 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 			return
 		}
 		switch r.URL.Path {
-		case "/v1/models/test-model":
-			if r.Method != http.MethodGet {
-				t.Errorf("method %s", r.Method)
-				return
-			}
-			mu.Lock()
-			sawModel = "test-model"
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"id":"test-model"}`)
 		case "/v1/chat/completions":
 			var payload struct {
 				Tools  []any `json:"tools"`
@@ -169,25 +158,16 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 	defer server.Close()
 
 	prepare(t)
-	t.Setenv("OLLAMA_HOST", "http://127.0.0.1:1")
-	t.Setenv("OLLAMA_MODEL", "ignored")
+	writeOllamaConfig(t, server.URL, "test-model")
 
 	stdout, stderr, err := startCLI(
 		t,
 		"how many lines?\n",
-		"--host",
-		server.URL,
 		"--model",
 		"ollama/test-model",
 	)
 	if err != nil {
 		t.Fatal(err)
-	}
-	mu.Lock()
-	gotModel := sawModel
-	mu.Unlock()
-	if gotModel != "test-model" {
-		t.Fatalf("show model = %q", gotModel)
 	}
 	if stdout != "There are 3 lines.\n" {
 		t.Fatalf("stdout %q", stdout)
@@ -207,9 +187,6 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 func TestNoHistoryWritesNothing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/models/test-model":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"id":"test-model"}`)
 		case "/v1/chat/completions":
 			writeSSE(w, contentChunk("ok"))
 		default:
@@ -219,11 +196,10 @@ func TestNoHistoryWritesNothing(t *testing.T) {
 	defer server.Close()
 
 	prepare(t)
+	writeOllamaConfig(t, server.URL, "test-model")
 	stdout, stderr, err := startCLI(
 		t,
 		"hi\nexit\n",
-		"--host",
-		server.URL,
 		"--model",
 		"ollama/test-model",
 		"--no-history",
@@ -250,6 +226,17 @@ func TestNoHistoryWritesNothing(t *testing.T) {
 	}
 }
 
+func TestMissingOllamaProviderNamesTheSetupCommand(t *testing.T) {
+	prepare(t)
+	_, stderr, err := startCLI(t, "", "--model", "ollama/qwen3.5:4b")
+	if err == nil || !strings.Contains(err.Error(), `unknown provider "ollama": run co ollama`) {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(stderr, "Usage:") {
+		t.Fatalf("usage leaked %q", stderr)
+	}
+}
+
 func TestBareModelIsUsageError(t *testing.T) {
 	prepare(t)
 	_, _, err := startCLI(t, "", "--model", "test-model")
@@ -265,12 +252,6 @@ func TestSlashModelsIsNotATurn(t *testing.T) {
 	var chatModel string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v1/models":
-			_, _ = io.WriteString(w, `{"data":[{"id":"test-model"}]}`)
-		case r.URL.Path == "/v1/models/test-model":
-			_, _ = io.WriteString(w, `{"id":"test-model"}`)
-		case r.URL.Path == "/v1/models/missing":
-			http.NotFound(w, r)
 		case r.URL.Path == "/v1/chat/completions":
 			var payload struct {
 				Model string `json:"model"`
@@ -291,11 +272,10 @@ func TestSlashModelsIsNotATurn(t *testing.T) {
 	defer server.Close()
 
 	prepare(t)
+	writeOllamaConfig(t, server.URL, "test-model")
 	stdout, stderr, err := startCLI(
 		t,
 		"/models\n/nope\n/models ollama/missing\nhi\n",
-		"--host",
-		server.URL,
 		"--model",
 		"ollama/test-model",
 	)
@@ -323,8 +303,6 @@ func TestSlashModelsSwitchesAndPersists(t *testing.T) {
 	var chatModel string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v1/models/test-model" || r.URL.Path == "/v1/models/other":
-			_, _ = io.WriteString(w, `{"id":"ok"}`)
 		case r.URL.Path == "/v1/chat/completions":
 			var payload struct {
 				Model string `json:"model"`
@@ -344,11 +322,10 @@ func TestSlashModelsSwitchesAndPersists(t *testing.T) {
 	defer server.Close()
 
 	prepare(t)
+	writeOllamaConfig(t, server.URL, "test-model", "other")
 	stdout, stderr, err := startCLI(
 		t,
 		"/models ollama/other\nhi\n",
-		"--host",
-		server.URL,
 		"--model",
 		"ollama/test-model",
 	)
@@ -410,8 +387,6 @@ func TestExitPrintsResumeAndContinueKeepsTheSession(t *testing.T) {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/models/test-model":
-			_, _ = io.WriteString(w, `{"id":"test-model"}`)
 		case "/v1/chat/completions":
 			var body struct {
 				Model    string `json:"model"`
@@ -441,11 +416,10 @@ func TestExitPrintsResumeAndContinueKeepsTheSession(t *testing.T) {
 	defer server.Close()
 
 	prepare(t)
+	writeOllamaConfig(t, server.URL, "test-model")
 	_, stderr, err := startCLI(
 		t,
 		"hi\nexit\n",
-		"--host",
-		server.URL,
 		"--model",
 		"ollama/test-model",
 	)
@@ -458,14 +432,20 @@ func TestExitPrintsResumeAndContinueKeepsTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(provider.HomeConfig(home), []byte("model: ollama/other\n"), 0o600); err != nil {
+	body := fmt.Sprintf(`model: "ollama/other"
+providers:
+  ollama:
+    base_url: %q
+    auth: none
+    models:
+      - test-model
+`, server.URL)
+	if err := os.WriteFile(provider.HomeConfig(home), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, stderr, err = startCLI(
 		t,
 		"again\nexit\n",
-		"--host",
-		server.URL,
 		"--resume",
 		"latest",
 	)
@@ -522,6 +502,320 @@ func TestResumeMissingSessionIsUsageError(t *testing.T) {
 	}
 	if strings.Contains(stderr, "Usage:") {
 		t.Fatalf("usage leaked %q", stderr)
+	}
+}
+
+func TestOllamaUsesTheRunningModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ps":
+			_, _ = io.WriteString(w, `{"models":[{"name":"b"}]}`)
+		case "/v1/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"b"},{"id":"a"},{"id":"a"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	prepare(t)
+	useInstalledOllama(t)
+	stdout, stderr, err := startCLI(t, "", "ollama", "--host", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != "model: ollama/b\n" {
+		t.Fatalf("stdout %q stderr %q", stdout, stderr)
+	}
+	if strings.Contains(stderr, "Which model?") {
+		t.Fatalf("asked despite a running model: %q", stderr)
+	}
+	text := readHomeConfig(t)
+	modelAt := strings.Index(text, "model:")
+	providersAt := strings.Index(text, "providers:")
+	if modelAt < 0 || providersAt < modelAt || !strings.Contains(text, `model: "ollama/b"`) {
+		t.Fatalf("config:\n%s", text)
+	}
+	if !strings.Contains(text, server.URL) || !strings.Contains(text, "auth: none") {
+		t.Fatalf("config:\n%s", text)
+	}
+	if !strings.Contains(text, "reasoning_effort: true") || !strings.Contains(text, "reasoning_delta: true") {
+		t.Fatalf("config:\n%s", text)
+	}
+	a := strings.Index(text, `"a"`)
+	b := strings.Index(text, `"b"`)
+	if a < 0 || b < a {
+		t.Fatalf("config:\n%s", text)
+	}
+}
+
+func TestOllamaRefreshKeepsCompatAndUsesRunningModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ps":
+			_, _ = io.WriteString(w, `{"models":[{"name":"qwen3:8b"}]}`)
+		case "/v1/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"qwen3:8b"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	prepare(t)
+	useInstalledOllama(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := provider.HomeConfig(home)
+	body := `model: "openrouter/keep"
+log-level: debug
+providers:
+  ollama:
+    base_url: http://old.example:11434
+    auth: none
+    models:
+      - old
+    compat:
+      reasoning_effort: false
+      reasoning_delta: false
+`
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _, err := startCLI(t, "", "ollama", "--host", server.URL+"/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != "model: ollama/qwen3:8b\n" {
+		t.Fatalf("stdout %q", stdout)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	modelAt := strings.Index(text, "model:")
+	providersAt := strings.Index(text, "providers:")
+	logAt := strings.Index(text, "log-level:")
+	if modelAt < 0 || providersAt < modelAt || logAt < providersAt {
+		t.Fatalf("config:\n%s", text)
+	}
+	if !strings.Contains(text, `model: "ollama/qwen3:8b"`) || strings.Contains(text, "old.example") {
+		t.Fatalf("config:\n%s", text)
+	}
+	if strings.Contains(text, "reasoning_effort: true") || !strings.Contains(text, server.URL) {
+		t.Fatalf("config:\n%s", text)
+	}
+	if !strings.Contains(text, `"qwen3:8b"`) || !strings.Contains(text, "log-level: debug") {
+		t.Fatalf("config:\n%s", text)
+	}
+}
+
+func TestOllamaNotInstalledWritesNothing(t *testing.T) {
+	prepare(t)
+	look := ollamaLookPath
+	t.Cleanup(func() { ollamaLookPath = look })
+	ollamaLookPath = func(string) (string, error) { return "", errors.New("not found") }
+
+	_, _, err := startCLI(t, "", "ollama")
+	if err == nil || !strings.Contains(err.Error(), "ollama is not installed") {
+		t.Fatalf("err = %v", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(provider.HomeConfig(home)); !os.IsNotExist(statErr) {
+		t.Fatal("config was written")
+	}
+}
+
+func TestOllamaAsksWhenNothingIsLoaded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ps":
+			_, _ = io.WriteString(w, `{"models":[]}`)
+		case "/v1/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"b"},{"id":"a"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	prepare(t)
+	useInstalledOllama(t)
+	stdout, stderr, err := startCLI(t, "2\n", "ollama", "--host", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != "model: ollama/b\n" {
+		t.Fatalf("stdout %q stderr %q", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "1. a") || !strings.Contains(stderr, "2. b") {
+		t.Fatalf("stderr %q", stderr)
+	}
+	if !strings.Contains(stderr, "Which model?") {
+		t.Fatalf("stderr %q", stderr)
+	}
+	if !strings.Contains(readHomeConfig(t), `model: "ollama/b"`) {
+		t.Fatalf("config:\n%s", readHomeConfig(t))
+	}
+}
+
+func TestOllamaStartsDaemonThenAsks(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	host := "http://" + addr
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ps":
+			_, _ = io.WriteString(w, `{"models":[]}`)
+		case "/v1/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"a"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer func() {
+		if server.Listener != nil {
+			server.Close()
+		}
+	}()
+
+	prepare(t)
+	useInstalledOllama(t)
+	var started int
+	ollamaStart = func(got string) error {
+		started++
+		if got != host {
+			t.Errorf("host %q", got)
+		}
+		listen, err := net.Listen("tcp", addr)
+		if err != nil {
+			return err
+		}
+		server.Listener = listen
+		server.Start()
+		return nil
+	}
+
+	stdout, stderr, err := startCLI(t, "a\n", "ollama", "--host", host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started != 1 {
+		t.Fatalf("started %d", started)
+	}
+	if stdout != "model: ollama/a\n" {
+		t.Fatalf("stdout %q stderr %q", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "Which model?") {
+		t.Fatalf("stderr %q", stderr)
+	}
+}
+
+func TestOllamaHostFromEnv(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ps":
+			_, _ = io.WriteString(w, `{"models":[{"name":"local"}]}`)
+		case "/v1/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"local"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	prepare(t)
+	useInstalledOllama(t)
+	t.Setenv("OLLAMA_HOST", server.URL)
+	if _, _, err := startCLI(t, "", "ollama"); err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(provider.HomeConfig(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), server.URL) || !strings.Contains(string(data), `model: "ollama/local"`) {
+		t.Fatalf("config:\n%s", data)
+	}
+}
+
+func TestOllamaEmptyHostIsUsageError(t *testing.T) {
+	prepare(t)
+	useInstalledOllama(t)
+	_, _, err := startCLI(t, "", "ollama", "--host", "")
+	var exitErr *exitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func useInstalledOllama(t *testing.T) {
+	t.Helper()
+	look := ollamaLookPath
+	start := ollamaStart
+	t.Cleanup(func() {
+		ollamaLookPath = look
+		ollamaStart = start
+	})
+	ollamaLookPath = func(string) (string, error) { return "ollama", nil }
+	ollamaStart = func(string) error {
+		t.Fatal("ollama serve was started")
+		return nil
+	}
+}
+
+func readHomeConfig(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(provider.HomeConfig(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func writeOllamaConfig(t *testing.T, baseURL string, models ...string) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body strings.Builder
+	if len(models) > 0 {
+		fmt.Fprintf(&body, "model: %q\n", "ollama/"+models[0])
+	}
+	fmt.Fprintf(&body, "providers:\n  ollama:\n    base_url: %q\n    auth: none\n    models:\n", baseURL)
+	for _, model := range models {
+		fmt.Fprintf(&body, "      - %q\n", model)
+	}
+	path := provider.HomeConfig(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body.String()), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

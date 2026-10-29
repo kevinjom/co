@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"co/internal/openai"
 )
 
 func TestParse(t *testing.T) {
@@ -42,8 +44,12 @@ log-level: debug
 providers:
   ollama:
     base_url: http://home.example:11434
+    auth: none
     models:
       - home-model
+    compat:
+      reasoning_effort: true
+      reasoning_delta: true
   openrouter:
     base_url: https://home.example/v1
     api_key_env: HOME_KEY
@@ -60,6 +66,9 @@ model: ollama/from-project
 providers:
   ollama:
     base_url: http://project.example:11434
+    auth: none
+    models:
+      - project-model
   openrouter:
     base_url: https://openrouter.ai/api/v1
     api_key_env: OPENROUTER_API_KEY
@@ -73,8 +82,6 @@ providers:
 		Home:       home,
 		ProjectDir: project,
 		FlagModel:  "ollama/from-flag",
-		Host:       "http://flag.example:11434",
-		HostSet:    true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -87,10 +94,13 @@ providers:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ollama.BaseURL != "http://flag.example:11434" || !ollama.LiveModels || ollama.NeedsKey() {
+	if ollama.BaseURL != "http://project.example:11434" || ollama.NeedsKey() {
 		t.Fatalf("ollama %+v", ollama)
 	}
-	if !ollama.Compat.ReasoningEffort || !ollama.Compat.ReasoningDelta {
+	if len(ollama.Models) != 1 || ollama.Models[0] != "project-model" {
+		t.Fatalf("ollama %+v", ollama)
+	}
+	if ollama.Compat.ReasoningEffort || ollama.Compat.ReasoningDelta {
 		t.Fatalf("ollama compat %+v", ollama.Compat)
 	}
 
@@ -105,7 +115,7 @@ providers:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ep.APIKey != "from-env" || ep.Probe || ep.Model != "qwen/qwen3-coder" {
+	if ep.APIKey != "from-env" || ep.Model != "qwen/qwen3-coder" {
 		t.Fatalf("endpoint %+v", ep)
 	}
 
@@ -115,6 +125,9 @@ providers:
 	}
 	if local.NeedsKey() {
 		t.Fatal("lmstudio should not need a key")
+	}
+	if err := cat.SaveKey("lmstudio", "nope"); err == nil {
+		t.Fatal("auth none accepted a key")
 	}
 }
 
@@ -132,11 +145,27 @@ func TestHomeModelWinsOverProject(t *testing.T) {
 	}
 }
 
-func TestExplicitOllamaModelsReplaceLiveList(t *testing.T) {
+func TestProviderRequiresBaseURL(t *testing.T) {
 	home := t.TempDir()
 	writeYAML(t, HomeConfig(home), `
 providers:
   ollama:
+    auth: none
+    models:
+      - qwen3:8b
+`)
+	if _, err := Load(LoadOptions{Home: home, ProjectDir: t.TempDir()}); err == nil {
+		t.Fatal("missing base_url was accepted")
+	}
+}
+
+func TestConfiguredModelIsRequired(t *testing.T) {
+	home := t.TempDir()
+	writeYAML(t, HomeConfig(home), `
+providers:
+  ollama:
+    base_url: http://127.0.0.1:11434
+    auth: none
     models:
       - qwen3:8b
     compat:
@@ -150,14 +179,21 @@ providers:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.LiveModels || len(p.Models) != 1 || p.Models[0] != "qwen3:8b" || p.Compat.ReasoningEffort {
+	if p.NeedsKey() || len(p.Models) != 1 || p.Models[0] != "qwen3:8b" {
 		t.Fatalf("ollama %+v", p)
 	}
-	if !p.Compat.ReasoningDelta {
-		t.Fatal("unset reasoning delta should stay on for ollama")
+	if p.Compat.ReasoningEffort || p.Compat.ReasoningDelta {
+		t.Fatalf("ollama %+v", p)
 	}
 	if _, err := cat.Endpoint(Ref{Provider: "ollama", Model: "missing"}); err == nil {
-		t.Fatal("missing explicit model was accepted")
+		t.Fatal("missing model was accepted")
+	}
+	ep, err := cat.Endpoint(Ref{Provider: "ollama", Model: "qwen3:8b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep.Model != "qwen3:8b" || ep.APIKey != "" {
+		t.Fatalf("endpoint %+v", ep)
 	}
 }
 
@@ -221,7 +257,7 @@ providers:
 	}
 
 	if err := cat.SaveKey("ollama", "nope"); err == nil {
-		t.Fatal("ollama accepted a key")
+		t.Fatal("unknown provider accepted a key")
 	}
 }
 
@@ -254,6 +290,140 @@ func TestSaveSelectionPreservesOtherKeys(t *testing.T) {
 	}
 	if reloaded.Selected() != "ollama/qwen3:8b" {
 		t.Fatalf("selected %q", reloaded.Selected())
+	}
+}
+
+func TestProvidersFollowModel(t *testing.T) {
+	home := t.TempDir()
+	path := HomeConfig(home)
+	writeYAML(t, path, `
+log-level: debug
+providers:
+  ollama:
+    base_url: http://127.0.0.1:11434
+    auth: none
+    models:
+      - qwen3:8b
+`)
+	cat, err := Load(LoadOptions{Home: home, ProjectDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.SaveSelection("ollama/qwen3:8b"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	modelAt := strings.Index(text, "model:")
+	providersAt := strings.Index(text, "providers:")
+	logAt := strings.Index(text, "log-level:")
+	if modelAt < 0 || providersAt < modelAt || logAt < providersAt {
+		t.Fatalf("config:\n%s", text)
+	}
+}
+
+func TestWriteProviderCreatesAndRefreshes(t *testing.T) {
+	home := t.TempDir()
+	path := HomeConfig(home)
+	err := WriteProvider(path, ProviderSpec{
+		ID:       "ollama",
+		BaseURL:  "http://127.0.0.1:11434/",
+		AuthNone: true,
+		Models:   []string{"b", "a"},
+		CompatOnCreate: &openai.Compat{
+			ReasoningEffort: true,
+			ReasoningDelta:  true,
+		},
+		DefaultModel: "ollama/a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	modelAt := strings.Index(text, "model:")
+	providersAt := strings.Index(text, "providers:")
+	if modelAt < 0 || providersAt < modelAt || !strings.Contains(text, `model: "ollama/a"`) {
+		t.Fatalf("config:\n%s", text)
+	}
+	if !strings.Contains(text, "reasoning_effort: true") || !strings.Contains(text, "reasoning_delta: true") {
+		t.Fatalf("config:\n%s", text)
+	}
+
+	writeYAML(t, path, `
+model: "openrouter/keep"
+log-level: debug
+providers:
+  ollama:
+    base_url: http://old.example:11434
+    auth: none
+    api_key_env: UNUSED
+    models:
+      - old
+    compat:
+      reasoning_effort: false
+      reasoning_delta: false
+`)
+	err = WriteProvider(path, ProviderSpec{
+		ID:       "ollama",
+		BaseURL:  "http://127.0.0.1:11434",
+		AuthNone: true,
+		Models:   []string{"qwen3:8b"},
+		CompatOnCreate: &openai.Compat{
+			ReasoningEffort: true,
+			ReasoningDelta:  true,
+		},
+		DefaultModel: "ollama/qwen3:8b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = string(data)
+	modelAt = strings.Index(text, "model:")
+	providersAt = strings.Index(text, "providers:")
+	logAt := strings.Index(text, "log-level:")
+	if modelAt < 0 || providersAt < modelAt || logAt < providersAt {
+		t.Fatalf("config:\n%s", text)
+	}
+	if !strings.Contains(text, `model: "openrouter/keep"`) || !strings.Contains(text, "http://127.0.0.1:11434") {
+		t.Fatalf("config:\n%s", text)
+	}
+	if strings.Contains(text, "old.example") || strings.Contains(text, "reasoning_effort: true") {
+		t.Fatalf("config:\n%s", text)
+	}
+	if !strings.Contains(text, "api_key_env: UNUSED") {
+		t.Fatalf("config:\n%s", text)
+	}
+	if !strings.Contains(text, "log-level: debug") || !strings.Contains(text, `"qwen3:8b"`) {
+		t.Fatalf("config:\n%s", text)
+	}
+
+	err = WriteProvider(path, ProviderSpec{
+		ID:       "ollama",
+		BaseURL:  "http://127.0.0.1:11434",
+		AuthNone: true,
+		Models:   []string{"qwen3:8b"},
+		Model:    "ollama/qwen3:8b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `model: "ollama/qwen3:8b"`) {
+		t.Fatalf("config:\n%s", data)
 	}
 }
 

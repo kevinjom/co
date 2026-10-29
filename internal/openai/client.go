@@ -17,8 +17,8 @@ const maxResponseBytes = 8 << 20
 const defaultReasoningEffort = "low"
 
 // Compat selects optional OpenAI-compatible fields.
-// Ollama sends reasoning_effort and reads the reasoning delta.
-// Other providers leave both off unless configured.
+// ReasoningEffort sends reasoning_effort on each chat request.
+// ReasoningDelta reads the reasoning field from stream chunks.
 type Compat struct {
 	ReasoningEffort bool
 	ReasoningDelta  bool
@@ -32,7 +32,8 @@ type Client struct {
 	http    *http.Client
 }
 
-// New returns a client for an Ollama daemon. A trailing slash is ignored.
+// New returns a client for baseURL with no API key.
+// A trailing slash is ignored.
 // Reasoning effort and the reasoning delta are enabled.
 func New(baseURL string) *Client {
 	return NewEndpoint(baseURL, "", Compat{

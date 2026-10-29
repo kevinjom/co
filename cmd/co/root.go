@@ -17,8 +17,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-const defaultHost = "http://127.0.0.1:11434"
-
 func newRootCmd() (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:           "co",
@@ -34,7 +32,6 @@ func newRootCmd() (*cobra.Command, error) {
 
 	cmd.PersistentFlags().String("config", "", "config file (default $HOME/.co/config.yaml)")
 	cmd.PersistentFlags().String("log-level", "info", "log level (debug, info, warn, error)")
-	cmd.Flags().String("host", defaultHost, "Ollama host")
 	cmd.Flags().String("model", "", "model as provider/model-id")
 	cmd.Flags().String("resume", "", "resume a session id, or latest")
 	cmd.Flags().Bool("no-history", false, "do not save the session transcript")
@@ -43,9 +40,6 @@ func newRootCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 	if err := bindFlag(cmd.PersistentFlags(), "log-level"); err != nil {
-		return nil, err
-	}
-	if err := bindFlag(cmd.Flags(), "host"); err != nil {
 		return nil, err
 	}
 	if err := bindFlag(cmd.Flags(), "model"); err != nil {
@@ -59,6 +53,7 @@ func newRootCmd() (*cobra.Command, error) {
 	}
 
 	cmd.AddCommand(newVersionCmd())
+	cmd.AddCommand(newOllamaCmd())
 	return cmd, nil
 }
 
@@ -93,9 +88,6 @@ func initConfig(cmd *cobra.Command) error {
 	viper.SetEnvPrefix("CO")
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	viper.AutomaticEnv()
-	if err := viper.BindEnv("host", "CO_HOST", "OLLAMA_HOST"); err != nil {
-		return fmt.Errorf("binding host: %w", err)
-	}
 	if err := viper.BindEnv("model", "CO_MODEL"); err != nil {
 		return fmt.Errorf("binding model: %w", err)
 	}
@@ -108,7 +100,6 @@ func initConfig(cmd *cobra.Command) error {
 	if err := viper.BindEnv("no-history", "CO_NO_HISTORY"); err != nil {
 		return fmt.Errorf("binding no-history: %w", err)
 	}
-	viper.SetDefault("host", defaultHost)
 	viper.SetDefault("log-level", "info")
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -166,16 +157,14 @@ func parseLogLevel(raw string) (slog.Level, error) {
 }
 
 func run(cmd *cobra.Command, _ []string) error {
-	hostSet := cmd.Flags().Changed("host") || os.Getenv("CO_HOST") != "" || os.Getenv("OLLAMA_HOST") != ""
-	host := ""
-	if hostSet {
-		host = viper.GetString("host")
-		if strings.TrimSpace(host) == "" {
-			return usageError(fmt.Errorf("host is required: set --host or OLLAMA_HOST"))
-		}
-	}
+	return start(cmd, "")
+}
 
+func start(cmd *cobra.Command, modelOverride string) error {
 	flagModel := explicitModel(cmd)
+	if strings.TrimSpace(modelOverride) != "" {
+		flagModel = strings.TrimSpace(modelOverride)
+	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -195,8 +184,6 @@ func run(cmd *cobra.Command, _ []string) error {
 		ProjectDir: cwd,
 		ConfigFile: configFile,
 		FlagModel:  flagModel,
-		Host:       host,
-		HostSet:    hostSet,
 	})
 	if err != nil {
 		return err
@@ -234,7 +221,11 @@ func run(cmd *cobra.Command, _ []string) error {
 		if errors.As(err, &parseErr) {
 			return usageError(err)
 		}
-		return err
+		err = hintUnknownProvider(err)
+		if !interactive {
+			return err
+		}
+		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
 	return repl(cmd, signals, app, cwd)
 }

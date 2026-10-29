@@ -7,8 +7,7 @@ import (
 )
 
 // Director is the session and catalog the TUI drives.
-// Select persists the choice. Models may return ids together with an error
-// when a live listing fails and other providers still have models.
+// Select persists the choice. Models lists configured provider/model-id values.
 type Director interface {
 	Models(context.Context) ([]string, error)
 	Select(context.Context, string) error

@@ -190,8 +190,8 @@ func appendToolCalls(drafts *[]toolDraft, calls []streamToolCall) {
 }
 
 // toolIndex uses the chunk index when present.
-// Ollama often omits index and sends a whole call in one chunk, so a new id or
-// name starts another call, and a bare arguments fragment extends the last one.
+// When index is omitted, a new id or name starts another call, and a bare
+// arguments fragment extends the last one.
 func toolIndex(drafts []toolDraft, call streamToolCall) int {
 	if call.Index != nil && *call.Index >= 0 {
 		return *call.Index

@@ -18,7 +18,6 @@ type Endpoint struct {
 	APIKey  string
 	Model   string
 	Compat  openai.Compat
-	Probe   bool
 }
 
 // NeedsKeyError means a provider requires a key and none is available.
@@ -31,15 +30,12 @@ func (e *NeedsKeyError) Error() string {
 }
 
 // LoadOptions chooses which files and overrides build a catalog.
-// ConfigFile replaces the home and project files. Host, when set, overrides
-// only the ollama base URL.
+// ConfigFile replaces the home and project files.
 type LoadOptions struct {
 	Home       string
 	ProjectDir string
 	ConfigFile string
 	FlagModel  string
-	Host       string
-	HostSet    bool
 }
 
 // Catalog is the merged set of providers for one process.
@@ -59,12 +55,8 @@ func HomeConfig(home string) string {
 	return filepath.Join(home, ".co", "config.yaml")
 }
 
-// Load reads config, credentials, and the built-in ollama provider.
+// Load reads config and credentials.
 func Load(opt LoadOptions) (*Catalog, error) {
-	if opt.HostSet && strings.TrimSpace(opt.Host) == "" {
-		return nil, fmt.Errorf("host is required: set --host or OLLAMA_HOST")
-	}
-
 	cat := &Catalog{
 		homeDir:  opt.Home,
 		homeFile: HomeConfig(opt.Home),
@@ -111,11 +103,6 @@ func Load(opt LoadOptions) (*Catalog, error) {
 	}
 
 	cat.providers = mergeProviders(layers...)
-	if opt.HostSet {
-		p := cat.providers["ollama"]
-		p.BaseURL = trimBase(opt.Host)
-		cat.providers["ollama"] = p
-	}
 
 	keys, err := loadKeys(opt.Home)
 	if err != nil {
@@ -155,23 +142,31 @@ func (c *Catalog) CanConnect(id string) error {
 	return nil
 }
 
+// UnknownProviderError means the selection names a provider that is not configured.
+type UnknownProviderError struct {
+	Provider string
+}
+
+func (e *UnknownProviderError) Error() string {
+	return fmt.Sprintf("unknown provider %q", e.Provider)
+}
+
 // Lookup returns a provider by id.
 func (c *Catalog) Lookup(id string) (Provider, error) {
 	p, ok := c.providers[id]
 	if !ok {
-		return Provider{}, fmt.Errorf("unknown provider %q", id)
+		return Provider{}, &UnknownProviderError{Provider: id}
 	}
 	return p, nil
 }
 
 // Endpoint resolves a selection to a base URL, key, and compat flags.
-// Ollama models are probed by the caller. Remote models are not.
 func (c *Catalog) Endpoint(ref Ref) (Endpoint, error) {
 	p, err := c.Lookup(ref.Provider)
 	if err != nil {
 		return Endpoint{}, err
 	}
-	if !p.LiveModels && !slices.Contains(p.Models, ref.Model) {
+	if !slices.Contains(p.Models, ref.Model) {
 		return Endpoint{}, fmt.Errorf("unknown model %q", ref.String())
 	}
 	key, err := c.apiKey(p)
@@ -184,35 +179,19 @@ func (c *Catalog) Endpoint(ref Ref) (Endpoint, error) {
 		APIKey:  key,
 		Model:   ref.Model,
 		Compat:  p.Compat,
-		Probe:   p.ID == "ollama",
 	}, nil
 }
 
-// List returns provider/model-id for every selectable model.
-// A failed Ollama listing is returned with whatever other providers offered,
-// and alone when Ollama was the only source.
-func (c *Catalog) List(ctx context.Context) ([]string, error) {
+// List returns provider/model-id for every configured model.
+func (c *Catalog) List(context.Context) ([]string, error) {
 	ids := make([]string, 0)
-	var liveErr error
 	for _, id := range c.ordered() {
 		p := c.providers[id]
-		models := p.Models
-		if p.LiveModels {
-			listed, err := listLive(ctx, p)
-			if err != nil {
-				liveErr = err
-				continue
-			}
-			models = listed
-		}
-		for _, model := range models {
+		for _, model := range p.Models {
 			ids = append(ids, Ref{Provider: p.ID, Model: model}.String())
 		}
 	}
-	if liveErr != nil && len(ids) == 0 {
-		return nil, liveErr
-	}
-	return ids, liveErr
+	return ids, nil
 }
 
 // SaveKey stores a key for a provider that accepts one.
@@ -266,22 +245,8 @@ func (c *Catalog) apiKey(p Provider) (string, error) {
 func (c *Catalog) ordered() []string {
 	ids := make([]string, 0, len(c.providers))
 	for id := range c.providers {
-		if id != "ollama" {
-			ids = append(ids, id)
-		}
+		ids = append(ids, id)
 	}
 	slices.Sort(ids)
-	if _, ok := c.providers["ollama"]; ok {
-		return append([]string{"ollama"}, ids...)
-	}
 	return ids
-}
-
-func listLive(ctx context.Context, p Provider) ([]string, error) {
-	client := openai.NewEndpoint(p.BaseURL, "", p.Compat)
-	ids, err := client.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing ollama models: %w", err)
-	}
-	return ids, nil
 }

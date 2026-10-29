@@ -1,1 +1,8 @@
 .agents/
+.cursh/
+
+.idea/
+
+.vscode/
+
+.DS_Store

@@ -9,23 +9,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const defaultOllamaURL = "http://127.0.0.1:11434"
-
 // Provider is one configured endpoint plus the models it offers.
 type Provider struct {
-	ID         string
-	BaseURL    string
-	APIKeyEnv  string
-	AuthNone   bool
-	LiveModels bool
-	Models     []string
-	Compat     openai.Compat
+	ID        string
+	BaseURL   string
+	APIKeyEnv string
+	AuthNone  bool
+	Models    []string
+	Compat    openai.Compat
 }
 
 // NeedsKey reports whether a selection requires an API key.
-// Ollama never does. Other providers do unless auth is none.
+// Auth none is the only provider that does not.
 func (p Provider) NeedsKey() bool {
-	return p.ID != "ollama" && !p.AuthNone
+	return !p.AuthNone
 }
 
 type fileDoc struct {
@@ -44,20 +41,6 @@ type providerFile struct {
 type compatFile struct {
 	ReasoningEffort *bool `yaml:"reasoning_effort"`
 	ReasoningDelta  *bool `yaml:"reasoning_delta"`
-}
-
-func builtinOllama() Provider {
-	return Provider{
-		ID:         "ollama",
-		BaseURL:    defaultOllamaURL,
-		AuthNone:   true,
-		LiveModels: true,
-		Models:     []string{},
-		Compat: openai.Compat{
-			ReasoningEffort: true,
-			ReasoningDelta:  true,
-		},
-	}
 }
 
 func readDoc(path string) (fileDoc, bool, error) {
@@ -102,20 +85,6 @@ func interpret(id string, raw providerFile) (Provider, error) {
 	if err != nil {
 		return Provider{}, err
 	}
-
-	if id == "ollama" {
-		p := builtinOllama()
-		if strings.TrimSpace(raw.BaseURL) != "" {
-			p.BaseURL = trimBase(raw.BaseURL)
-		}
-		if raw.Models != nil {
-			p.LiveModels = false
-			p.Models = models
-		}
-		applyCompat(&p, raw.Compat)
-		return p, nil
-	}
-
 	if strings.TrimSpace(raw.BaseURL) == "" {
 		return Provider{}, fmt.Errorf("provider %q: base_url is required", id)
 	}
@@ -183,9 +152,7 @@ func trimBase(raw string) string {
 }
 
 func mergeProviders(layers ...map[string]Provider) map[string]Provider {
-	out := map[string]Provider{
-		"ollama": builtinOllama(),
-	}
+	out := map[string]Provider{}
 	for _, layer := range layers {
 		for id, p := range layer {
 			out[id] = p

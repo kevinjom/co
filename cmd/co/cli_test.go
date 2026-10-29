@@ -298,6 +298,56 @@ func TestSlashModelsIsNotATurn(t *testing.T) {
 	}
 }
 
+func TestConnectListsKeyProviders(t *testing.T) {
+	prepare(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `
+model: ollama/test-model
+providers:
+  ollama:
+    base_url: http://127.0.0.1:11434
+    auth: none
+    models:
+      - test-model
+  gemini:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key_env: GEMINI_API_KEY
+    models:
+      - gemini-2.5-flash
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    models:
+      - qwen/qwen3-coder
+`
+	path := provider.HomeConfig(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := startCLI(t, "/connect\nexit\n", "--no-history")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout %q", stdout)
+	}
+	if !strings.Contains(stderr, "gemini\n") || !strings.Contains(stderr, "openrouter\n") {
+		t.Fatalf("stderr %q", stderr)
+	}
+	for _, line := range strings.Split(stderr, "\n") {
+		if line == "ollama" {
+			t.Fatalf("auth none was listed: %q", stderr)
+		}
+	}
+}
+
 func TestSlashModelsSwitchesAndPersists(t *testing.T) {
 	var mu sync.Mutex
 	var chatModel string

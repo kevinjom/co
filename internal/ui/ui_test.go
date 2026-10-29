@@ -324,10 +324,11 @@ func TestWrapKeepsExistingLines(t *testing.T) {
 }
 
 type fakeDirector struct {
-	models  []string
-	picked  string
-	session *agent.Session
-	ready   bool
+	models    []string
+	providers []string
+	picked    string
+	session   *agent.Session
+	ready     bool
 }
 
 func (f *fakeDirector) Models(context.Context) ([]string, error) { return f.models, nil }
@@ -335,6 +336,7 @@ func (f *fakeDirector) Select(_ context.Context, ref string) error {
 	f.picked = ref
 	return nil
 }
+func (f *fakeDirector) Providers() []string          { return f.providers }
 func (f *fakeDirector) CanConnect(string) error      { return nil }
 func (f *fakeDirector) Connect(string, string) error { return nil }
 func (f *fakeDirector) Model() string                { return f.picked }
@@ -377,6 +379,80 @@ func TestModelsCommandDoesNotStartATurn(t *testing.T) {
 	}
 	if got.busy || strings.Contains(ansi.Strip(got.renderTranscript()), "❯ /models") {
 		t.Fatal("command was sent as a chat turn")
+	}
+}
+
+func TestConnectOpensProviderPicker(t *testing.T) {
+	m := newTestModel(t)
+	director := &fakeDirector{
+		providers: []string{"gemini", "openrouter"},
+		session:   m.session,
+		ready:     true,
+	}
+	m.director = director
+	m.input.SetValue("/connect")
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if got.busy || got.mode != modeProviders || cmd != nil {
+		t.Fatalf("busy=%v mode=%d cmd=%v", got.busy, got.mode, cmd != nil)
+	}
+	plain := ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "gemini") || !strings.Contains(plain, "openrouter") || !strings.Contains(plain, "choose a provider") {
+		t.Fatalf("picker %q", plain)
+	}
+	if h := lipgloss.Height(got.View().Content); h != 24 {
+		t.Fatalf("height %d\n%s", h, plain)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Text: "open"})
+	got = updated.(*model)
+	plain = ansi.Strip(got.View().Content)
+	if strings.Contains(plain, "gemini") || !strings.Contains(plain, "openrouter") {
+		t.Fatalf("filter %q", plain)
+	}
+
+	updated, cmd = got.Update(press(tea.KeyEnter, 0))
+	got = updated.(*model)
+	if cmd != nil || got.mode != modeConnect || got.connectID != "openrouter" {
+		t.Fatalf("mode %d id %q cmd=%v", got.mode, got.connectID, cmd != nil)
+	}
+	plain = ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "key for openrouter") {
+		t.Fatalf("key prompt %q", plain)
+	}
+	if strings.Contains(ansi.Strip(got.renderTranscript()), "❯ /connect") {
+		t.Fatal("command was sent as a chat turn")
+	}
+}
+
+func TestConnectWithProviderSkipsPicker(t *testing.T) {
+	m := newTestModel(t)
+	m.director = &fakeDirector{
+		providers: []string{"gemini", "openrouter"},
+		session:   m.session,
+		ready:     true,
+	}
+	m.input.SetValue("/connect gemini")
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if cmd != nil || got.mode != modeConnect || got.connectID != "gemini" {
+		t.Fatalf("mode %d id %q cmd=%v", got.mode, got.connectID, cmd != nil)
+	}
+	plain := ansi.Strip(got.View().Content)
+	if strings.Contains(plain, "openrouter") || !strings.Contains(plain, "key for gemini") {
+		t.Fatalf("view %q", plain)
+	}
+}
+
+func TestConnectWithNoProviders(t *testing.T) {
+	m := newTestModel(t)
+	m.director = &fakeDirector{session: m.session, ready: true}
+	m.input.SetValue("/connect")
+	updated, _ := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	plain := ansi.Strip(got.View().Content)
+	if got.mode != modeProviders || !strings.Contains(plain, "no providers accept an API key") {
+		t.Fatalf("mode %d view %q", got.mode, plain)
 	}
 }
 

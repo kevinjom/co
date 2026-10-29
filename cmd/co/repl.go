@@ -140,6 +140,16 @@ func runLineCommand(cmd *cobra.Command, signals *signalSession, app *command.App
 		fmt.Fprintf(stderr, "model %s\n", app.Model())
 		return true, nil
 	case command.KindConnect:
+		if parsed.Arg == "" {
+			ids := app.Providers()
+			for _, id := range ids {
+				fmt.Fprintln(stderr, id)
+			}
+			if len(ids) == 0 {
+				fmt.Fprintln(stderr, "no providers accept an API key")
+			}
+			return true, nil
+		}
 		if !interactive {
 			return true, usageError(app.RejectConnect(parsed.Arg))
 		}

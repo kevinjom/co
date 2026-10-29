@@ -182,6 +182,17 @@ func (c *Catalog) Endpoint(ref Ref) (Endpoint, error) {
 	}, nil
 }
 
+// Providers returns ids that accept an API key, in sorted order.
+func (c *Catalog) Providers() []string {
+	ids := []string{}
+	for _, id := range c.ordered() {
+		if c.providers[id].NeedsKey() {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 // List returns provider/model-id for every configured model.
 func (c *Catalog) List(context.Context) ([]string, error) {
 	ids := make([]string, 0)

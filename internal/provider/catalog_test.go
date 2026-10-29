@@ -197,6 +197,36 @@ providers:
 	}
 }
 
+func TestProvidersSkipsAuthNone(t *testing.T) {
+	home := t.TempDir()
+	writeYAML(t, HomeConfig(home), `
+providers:
+  ollama:
+    base_url: http://127.0.0.1:11434
+    auth: none
+    models:
+      - qwen3:8b
+  gemini:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key_env: GEMINI_API_KEY
+    models:
+      - gemini-2.5-flash
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    models:
+      - qwen/qwen3-coder
+`)
+	cat, err := Load(LoadOptions{Home: home, ProjectDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(cat.Providers(), ",")
+	if got != "gemini,openrouter" {
+		t.Fatalf("providers %q", got)
+	}
+}
+
 func TestKeyFileLosesToEnv(t *testing.T) {
 	home := t.TempDir()
 	writeYAML(t, HomeConfig(home), `

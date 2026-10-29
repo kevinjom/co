@@ -63,6 +63,7 @@ type inputMode int
 const (
 	modeChat inputMode = iota
 	modeModels
+	modeProviders
 	modeConnect
 )
 
@@ -81,6 +82,7 @@ type model struct {
 	filter        string
 	cursor        int
 	modelIDs      []string
+	providerIDs   []string
 	modelsLoaded  bool
 	pickerErr     string
 	connectID     string
@@ -278,7 +280,7 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.mode {
-	case modeModels:
+	case modeModels, modeProviders:
 		return m.onPickerKey(msg)
 	case modeConnect:
 		return m.onConnectKey(msg)
@@ -411,6 +413,9 @@ func (m *model) submit() tea.Cmd {
 		return m.selectModel(parsed.Arg, false)
 	case command.KindConnect:
 		m.input.Reset()
+		if parsed.Arg == "" {
+			return m.openProviders()
+		}
 		return m.beginConnect(parsed.Arg)
 	case command.KindError:
 		m.input.Reset()

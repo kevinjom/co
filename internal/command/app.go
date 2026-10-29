@@ -54,6 +54,11 @@ func (a *App) Models(ctx context.Context) ([]string, error) {
 	return a.cat.List(ctx)
 }
 
+// Providers lists configured providers that accept an API key.
+func (a *App) Providers() []string {
+	return a.cat.Providers()
+}
+
 // Activate selects a model for startup and does not write ~/.co/config.yaml.
 func (a *App) Activate(ctx context.Context, raw string) error {
 	return a.use(ctx, raw, false)

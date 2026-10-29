@@ -17,7 +17,8 @@ func TestParse(t *testing.T) {
 		{line: "/models", kind: KindModels},
 		{line: "/models openrouter/qwen/qwen3-coder", kind: KindModels, arg: "openrouter/qwen/qwen3-coder"},
 		{line: "/connect openrouter", kind: KindConnect, arg: "openrouter"},
-		{line: "/connect", kind: KindError},
+		{line: "/connect", kind: KindConnect},
+		{line: "/connect open router", kind: KindError},
 		{line: "/nope", kind: KindError},
 	}
 	for _, tc := range cases {

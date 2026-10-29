@@ -116,6 +116,8 @@ func (m *model) statusLine() string {
 		left = m.spin.View() + style.Render(label)
 	case m.mode == modeModels:
 		left = m.theme.dim.Render("choose a model")
+	case m.mode == modeProviders:
+		left = m.theme.dim.Render("choose a provider")
 	case m.mode == modeConnect:
 		left = m.theme.dim.Render("api key")
 	case !m.viewport.AtBottom():
@@ -132,9 +134,9 @@ func (m *model) helpLine() string {
 	switch {
 	case m.busy:
 		text = "ctrl+c stop  ·  pgup/pgdn scroll"
-	case m.mode == modeModels && m.session == nil:
+	case (m.mode == modeModels || m.mode == modeProviders) && m.session == nil:
 		text = "enter select  ·  esc quit  ·  up/down move"
-	case m.mode == modeModels:
+	case m.mode == modeModels || m.mode == modeProviders:
 		text = "enter select  ·  esc close  ·  up/down move"
 	case m.mode == modeConnect:
 		text = "enter save  ·  esc cancel"

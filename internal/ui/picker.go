@@ -113,18 +113,40 @@ func (m *model) onSelected(msg selectDoneMsg) (tea.Model, tea.Cmd) {
 	return m, m.input.Focus()
 }
 
+func (m *model) openProviders() tea.Cmd {
+	if m.director == nil {
+		m.addBlock(block{kind: blockError, text: "connect is unavailable"})
+		return nil
+	}
+	m.mode = modeProviders
+	m.filter = ""
+	m.cursor = 0
+	m.providerIDs = m.director.Providers()
+	m.pickerErr = ""
+	m.layout()
+	m.paint()
+	return nil
+}
+
 func (m *model) beginConnect(id string) tea.Cmd {
 	if m.director == nil {
 		m.addBlock(block{kind: blockError, text: "connect is unavailable"})
 		return nil
 	}
 	if err := m.director.CanConnect(id); err != nil {
+		if m.mode == modeProviders {
+			m.pickerErr = err.Error()
+			m.layout()
+			m.paint()
+			return nil
+		}
 		m.addBlock(block{kind: blockError, text: err.Error()})
 		return nil
 	}
 	m.mode = modeConnect
 	m.connectID = id
 	m.secret = ""
+	m.filter = ""
 	m.pickerErr = ""
 	m.layout()
 	m.paint()
@@ -146,9 +168,9 @@ func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.paint()
 		return m, m.input.Focus()
 	case "enter", "ctrl+m":
-		ids := m.visibleModels()
+		ids := m.pickerIDs()
 		if len(ids) == 0 {
-			m.pickerErr = "no matching model"
+			m.pickerErr = m.emptyListText()
 			m.layout()
 			m.paint()
 			return m, nil
@@ -156,7 +178,14 @@ func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.cursor >= len(ids) {
 			m.cursor = 0
 		}
-		return m, m.selectModel(ids[m.cursor], true)
+		switch m.mode {
+		case modeModels:
+			return m, m.selectModel(ids[m.cursor], true)
+		case modeProviders:
+			return m, m.beginConnect(ids[m.cursor])
+		default:
+			panic(fmt.Sprintf("unhandled input mode %d", m.mode))
+		}
 	case "up":
 		if m.cursor > 0 {
 			m.cursor--
@@ -164,7 +193,7 @@ func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "down":
-		if m.cursor+1 < len(m.visibleModels()) {
+		if m.cursor+1 < len(m.pickerIDs()) {
 			m.cursor++
 			m.paint()
 		}
@@ -263,7 +292,7 @@ func (m *model) onPaste(text string) (tea.Model, tea.Cmd) {
 		m.pickerErr = ""
 		m.paint()
 		return m, nil
-	case modeModels:
+	case modeModels, modeProviders:
 		line, _, _ := strings.Cut(text, "\n")
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -316,13 +345,26 @@ func (m *model) onConnected(msg connectDoneMsg) (tea.Model, tea.Cmd) {
 	return m, m.input.Focus()
 }
 
-func (m *model) visibleModels() []string {
-	query := strings.ToLower(strings.TrimSpace(m.filter))
+func (m *model) pickerIDs() []string {
+	var ids []string
+	switch m.mode {
+	case modeModels:
+		ids = m.modelIDs
+	case modeProviders:
+		ids = m.providerIDs
+	default:
+		return []string{}
+	}
+	return filterIDs(ids, m.filter)
+}
+
+func filterIDs(ids []string, filter string) []string {
+	query := strings.ToLower(strings.TrimSpace(filter))
 	if query == "" {
-		return m.modelIDs
+		return ids
 	}
 	out := []string{}
-	for _, id := range m.modelIDs {
+	for _, id := range ids {
 		if strings.Contains(strings.ToLower(id), query) {
 			out = append(out, id)
 		}
@@ -330,11 +372,21 @@ func (m *model) visibleModels() []string {
 	return out
 }
 
+func (m *model) emptyListText() string {
+	if m.mode == modeProviders {
+		if len(m.providerIDs) == 0 {
+			return "no providers accept an API key"
+		}
+		return "no matching provider"
+	}
+	return "no matching model"
+}
+
 func (m *model) inputView() string {
 	switch m.mode {
 	case modeChat:
 		return m.input.View()
-	case modeModels:
+	case modeModels, modeProviders:
 		return m.theme.dim.Render(ansi.Truncate("filter: "+m.filter, m.usableWidth(), "…"))
 	case modeConnect:
 		dots := strings.Repeat("•", len([]rune(m.secret)))
@@ -350,7 +402,9 @@ func (m *model) overlayView() string {
 	case modeChat:
 		return m.commandOverlay()
 	case modeModels:
-		return m.modelsOverlay()
+		return m.choiceOverlay(!m.modelsLoaded, "loading models")
+	case modeProviders:
+		return m.choiceOverlay(false, "")
 	case modeConnect:
 		if m.pickerErr == "" {
 			return ""
@@ -361,18 +415,18 @@ func (m *model) overlayView() string {
 	}
 }
 
-func (m *model) modelsOverlay() string {
+func (m *model) choiceOverlay(loading bool, loadingText string) string {
 	width := m.usableWidth()
 	lines := []string{}
 	if m.pickerErr != "" {
 		lines = append(lines, m.theme.bad.Render(ansi.Truncate(m.pickerErr, width, "…")))
 	}
-	ids := m.visibleModels()
+	ids := m.pickerIDs()
 	switch {
-	case !m.modelsLoaded:
-		lines = append(lines, m.theme.dim.Render("loading models"))
+	case loading:
+		lines = append(lines, m.theme.dim.Render(loadingText))
 	case len(ids) == 0:
-		lines = append(lines, m.theme.dim.Render("no matching model"))
+		lines = append(lines, m.theme.dim.Render(m.emptyListText()))
 	default:
 		lines = append(lines, m.choiceLines(ids, m.cursor)...)
 	}

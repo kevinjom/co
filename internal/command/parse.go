@@ -35,7 +35,8 @@ func slashCommands() []string {
 
 // Parse classifies a line before it can become a chat turn.
 // /models and /models <provider>/<model-id> select a model.
-// /connect <provider> stores a key. exit and quit leave the session.
+// /connect lists providers that accept a key. /connect <provider> skips that list.
+// exit and quit leave the session.
 func Parse(line string) Parsed {
 	line = strings.TrimSpace(line)
 	switch line {
@@ -52,8 +53,8 @@ func Parse(line string) Parsed {
 	case cmdModels:
 		return Parsed{Kind: KindModels, Arg: arg}
 	case cmdConnect:
-		if arg == "" || strings.ContainsAny(arg, " \t") {
-			return Parsed{Kind: KindError, Err: errors.New("usage: /connect <provider>")}
+		if strings.ContainsAny(arg, " \t") {
+			return Parsed{Kind: KindError, Err: errors.New("usage: /connect [provider]")}
 		}
 		return Parsed{Kind: KindConnect, Arg: arg}
 	default:

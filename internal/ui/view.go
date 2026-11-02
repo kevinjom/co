@@ -69,18 +69,23 @@ func pickHex(dark bool, light, night string) string {
 
 func styleInput(ta *textarea.Model, th theme) {
 	styles := textarea.DefaultStyles(th.dark)
-	styles.Focused.Base = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.accentColor).
-		Padding(0, 1)
-	styles.Blurred.Base = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.blurBorder).
-		Padding(0, 1)
 	placeholder := lipgloss.NewStyle().Foreground(th.faint)
 	styles.Focused.Placeholder = placeholder
 	styles.Blurred.Placeholder = placeholder
 	ta.SetStyles(styles)
+}
+
+// inputChrome draws the single prompt box. The border stays off the textarea
+// style: bubbles paints that style twice while the placeholder is showing.
+func inputChrome(focused bool, th theme) lipgloss.Style {
+	ink := th.blurBorder
+	if focused {
+		ink = th.accentColor
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ink).
+		Padding(0, 1)
 }
 
 func (m *model) headerLine() string {

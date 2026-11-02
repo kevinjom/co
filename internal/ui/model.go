@@ -185,7 +185,7 @@ func historyBlocks(session *agent.Session) []block {
 func newInput(th theme) textarea.Model {
 	ta := textarea.New()
 	ta.Prompt = ""
-	ta.Placeholder = "Ask about this codebase"
+	ta.Placeholder = "> Ask about this codebase"
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 64 * 1024
 	ta.MaxHeight = 6
@@ -638,7 +638,11 @@ func (m *model) layout() {
 	if height <= 0 {
 		height = 24
 	}
-	m.input.SetWidth(width)
+	inner := width - inputChrome(false, m.theme).GetHorizontalFrameSize()
+	if inner < 1 {
+		inner = 1
+	}
+	m.input.SetWidth(inner)
 	inputH := lipgloss.Height(m.inputView())
 	overlayH := 0
 	if extra := m.overlayView(); extra != "" {

@@ -385,7 +385,7 @@ func (m *model) emptyListText() string {
 func (m *model) inputView() string {
 	switch m.mode {
 	case modeChat:
-		return m.input.View()
+		return inputChrome(m.input.Focused(), m.theme).Render(m.input.View())
 	case modeModels, modeProviders:
 		return m.theme.dim.Render(ansi.Truncate("filter: "+m.filter, m.usableWidth(), "…"))
 	case modeConnect:

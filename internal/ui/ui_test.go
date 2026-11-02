@@ -43,6 +43,12 @@ func TestViewIsInline(t *testing.T) {
 	if !strings.Contains(plain, "enter send") {
 		t.Fatalf("help missing: %q", plain)
 	}
+	if !strings.Contains(plain, "> Ask about this codebase") {
+		t.Fatalf("placeholder missing: %q", plain)
+	}
+	if strings.Count(plain, "╭") != 1 {
+		t.Fatalf("prompt border: %q", plain)
+	}
 	if w := lipgloss.Width(view.Content); w > 80 {
 		t.Fatalf("width %d", w)
 	}

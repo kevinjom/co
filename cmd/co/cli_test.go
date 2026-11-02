@@ -251,8 +251,8 @@ func TestSlashModelsIsNotATurn(t *testing.T) {
 	var chats int
 	var chatModel string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/v1/chat/completions":
+		switch r.URL.Path {
+		case "/v1/chat/completions":
 			var payload struct {
 				Model string `json:"model"`
 			}
@@ -352,8 +352,8 @@ func TestSlashModelsSwitchesAndPersists(t *testing.T) {
 	var mu sync.Mutex
 	var chatModel string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/v1/chat/completions":
+		switch r.URL.Path {
+		case "/v1/chat/completions":
 			var payload struct {
 				Model string `json:"model"`
 			}

@@ -151,3 +151,7 @@ Paths are resolved, and a path that leaves the directory is rejected.
 ```sh
 go test ./...
 ```
+
+## License
+
+[MIT](LICENSE)

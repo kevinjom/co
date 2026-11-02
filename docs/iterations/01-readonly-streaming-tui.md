@@ -214,20 +214,6 @@ When the turn finishes:
 
 A stale `turnID` is ignored, so a canceled turn cannot paint over the next one. If the parent signal context is already canceled when the turn finishes, the program quits with that error.
 
-## How this tree was built
-
-There is no earlier iteration. These are the commits that produced this snapshot, oldest first:
-
-| Commit | Subject |
-| --- | --- |
-| `baf449e` | first slice — cli and the tool loop |
-| `f7d17a3` | Bubble Tea TUI |
-| `8a142a1` | stream Ollama chat completions |
-| `2b35841` | stream answers and tool progress |
-| `672af56` | record completed messages in a session JSONL |
-| `a3fc0b8` | pass a nil recorder from the UI tests |
-| `2db263a` | show streamed reasoning in the TUI |
-
 ## Tests
 
 `go test ./...` covers the loop (tool round cap, partial answers on cancel, history failures, reasoning-only replies), the SSE parser (split tool calls, missing indexes, cancel, empty body), the path jail, read and grep limits, the JSONL record shape, TUI updates (streaming, interrupt, stale turns), and a piped CLI turn that separates the answer on stdout from the tool trace on stderr.

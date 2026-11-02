@@ -58,6 +58,11 @@ func newRootCmd() (*cobra.Command, error) {
 
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newOllamaCmd())
+	sessionCmd, err := newSessionCmd()
+	if err != nil {
+		return nil, err
+	}
+	cmd.AddCommand(sessionCmd)
 	return cmd, nil
 }
 

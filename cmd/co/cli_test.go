@@ -15,8 +15,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/kevinjom/co/internal/openai"
 	"github.com/kevinjom/co/internal/provider"
+	"github.com/kevinjom/co/internal/transcript"
 
 	"github.com/spf13/viper"
 )
@@ -67,6 +70,7 @@ func prepare(t *testing.T) {
 	t.Setenv("CO_NO_HISTORY", "")
 	t.Setenv("CO_CLEAR_SCROLLBACK", "")
 	t.Setenv("CO_RESUME", "")
+	t.Setenv("CO_LIMIT", "")
 	t.Chdir(t.TempDir())
 	viper.Reset()
 }
@@ -956,4 +960,214 @@ func assertSessionRoles(t *testing.T, roles ...string) {
 			t.Fatalf("line %d seq %d role %q", i+1, rec.Seq, rec.Message.Role)
 		}
 	}
+}
+
+func TestSessionListWritesNewestFirst(t *testing.T) {
+	prepare(t)
+	ids := seedSessions(t, 2)
+	stdout, stderr, err := startCLI(t, "", "session", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := sessionRows(t, stdout)
+	if len(rows) != 2 {
+		t.Fatalf("rows %v", rows)
+	}
+	newest := rows[0]
+	hasID := strings.Contains(newest, ids[1])
+	hasPrompt := strings.Contains(newest, "prompt 1")
+	hasModel := strings.Contains(newest, "ollama/test-model")
+	if !hasID || !hasPrompt || !hasModel {
+		t.Fatalf("newest row %q", newest)
+	}
+	if !strings.Contains(rows[0], "2026-01-01T01:00:00Z") {
+		t.Fatalf("updated %q", rows[0])
+	}
+	if !strings.Contains(rows[1], ids[0]) || !strings.Contains(rows[1], "prompt 0") {
+		t.Fatalf("older row %q", rows[1])
+	}
+	if strings.Contains(stderr, "Usage:") {
+		t.Fatalf("usage leaked %q", stderr)
+	}
+}
+
+func TestSessionListDefaultsToTwenty(t *testing.T) {
+	prepare(t)
+	ids := seedSessions(t, 21)
+	stdout, _, err := startCLI(t, "", "session", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := sessionRows(t, stdout)
+	if len(rows) != 20 {
+		t.Fatalf("rows = %d", len(rows))
+	}
+	if !strings.Contains(rows[0], ids[20]) {
+		t.Fatalf("newest missing in %q", rows[0])
+	}
+	if strings.Contains(stdout, ids[0]) {
+		t.Fatal("oldest session was included")
+	}
+}
+
+func TestSessionListLimitFlag(t *testing.T) {
+	prepare(t)
+	ids := seedSessions(t, 3)
+	stdout, _, err := startCLI(t, "", "session", "list", "--limit", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := sessionRows(t, stdout)
+	if len(rows) != 1 || !strings.Contains(rows[0], ids[2]) {
+		t.Fatalf("rows %v", rows)
+	}
+
+	t.Setenv("CO_LIMIT", "1")
+	stdout, _, err = startCLI(t, "", "session", "list", "--limit", "2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows = sessionRows(t, stdout)
+	if len(rows) != 2 || !strings.Contains(rows[0], ids[2]) || !strings.Contains(rows[1], ids[1]) {
+		t.Fatalf("flag did not override env: %v", rows)
+	}
+}
+
+func TestSessionListUsesEnvLimit(t *testing.T) {
+	prepare(t)
+	ids := seedSessions(t, 2)
+	t.Setenv("CO_LIMIT", "1")
+	stdout, _, err := startCLI(t, "", "session", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := sessionRows(t, stdout)
+	if len(rows) != 1 || !strings.Contains(rows[0], ids[1]) {
+		t.Fatalf("rows %v", rows)
+	}
+}
+
+func TestSessionListRejectsBadLimit(t *testing.T) {
+	prepare(t)
+	assertUsage := func(args ...string) {
+		t.Helper()
+		stdout, stderr, err := startCLI(t, "", args...)
+		var exitErr *exitError
+		if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+			t.Fatalf("args %v err = %v", args, err)
+		}
+		if strings.Contains(stdout, "Usage:") || strings.Contains(stderr, "Usage:") {
+			t.Fatalf("usage leaked stdout=%q stderr=%q", stdout, stderr)
+		}
+	}
+	assertUsage("session", "list", "--limit", "0")
+	assertUsage("session", "list", "--limit=-3")
+	t.Setenv("CO_LIMIT", "many")
+	assertUsage("session", "list")
+}
+
+func TestSessionListEmpty(t *testing.T) {
+	prepare(t)
+	stdout, stderr, err := startCLI(t, "", "session", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout %q", stdout)
+	}
+	if strings.Contains(stderr, "Usage:") {
+		t.Fatalf("usage leaked %q", stderr)
+	}
+}
+
+func TestSessionListStaysInThisDirectory(t *testing.T) {
+	prepare(t)
+	ids := seedSessions(t, 1)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := t.TempDir()
+	w, err := transcript.Open(home, other, "ollama/elsewhere")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(openai.Message{Role: "user", Content: "other project"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _, err := startCLI(t, "", "session", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout, w.ID()) || strings.Contains(stdout, "other project") {
+		t.Fatalf("listed another directory: %s", stdout)
+	}
+	rows := sessionRows(t, stdout)
+	if len(rows) != 1 || !strings.Contains(rows[0], ids[0]) {
+		t.Fatalf("rows %v", rows)
+	}
+}
+
+func seedSessions(t *testing.T, n int) []string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, n)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := range n {
+		w, err := transcript.Open(home, dir, "ollama/test-model")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Record(openai.Message{Role: "user", Content: fmt.Sprintf("prompt %d", i)}, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		when := base.Add(time.Duration(i) * time.Hour)
+		if err := os.Chtimes(sessionPath(t, home, w.ID()), when, when); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, w.ID())
+	}
+	return ids
+}
+
+func sessionPath(t *testing.T, home, id string) string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(home, ".co", "projects", "*", "sessions", id+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("session files %v", matches)
+	}
+	return matches[0]
+}
+
+func sessionRows(t *testing.T, stdout string) []string {
+	t.Helper()
+	text := strings.TrimSuffix(stdout, "\n")
+	if text == "" {
+		t.Fatal("empty session list")
+	}
+	lines := strings.Split(text, "\n")
+	header := lines[0]
+	for _, column := range []string{"ID", "UPDATED", "MODEL", "PREVIEW"} {
+		if !strings.Contains(header, column) {
+			t.Fatalf("header %q", header)
+		}
+	}
+	return lines[1:]
 }

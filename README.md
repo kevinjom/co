@@ -102,6 +102,7 @@ co
 co --model ollama/qwen3:8b
 co --resume latest
 co --resume 20261102T120000Z-ab12 --no-history
+co session list
 ```
 
 With no model selected, a terminal opens the model picker. Anything else exits and asks for `--model` or `model` in `~/.co/config.yaml`.
@@ -140,6 +141,13 @@ Each directory gets its own transcripts:
 ```
 
 `<project>` is the absolute path with every separator replaced by `-`. The file is mode `0600` and is created on the first completed message, so quitting before that leaves nothing behind. `--resume latest` opens the most recently modified file for this directory. A trailing partial line, from a crash during a write, is dropped.
+
+```sh
+co session list
+co session list --limit 5
+```
+
+`co session list` prints the newest sessions for this directory, 20 by default. `--limit`, `-n`, and `CO_LIMIT` set how many. The first row is the session `--resume latest` would open. Each row is the id, the last update time in UTC, the latest model, and the first prompt on one line.
 
 ## What the model can do
 

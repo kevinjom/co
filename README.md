@@ -147,7 +147,7 @@ co session list
 co session list --limit 5
 ```
 
-`co session list` prints the newest sessions for this directory, 20 by default. `--limit`, `-n`, and `CO_LIMIT` set how many. The first row is the session `--resume latest` would open. Each row is the id, the last update time in UTC, the latest model, and the first prompt on one line.
+`co session list` prints the newest sessions for this directory, 20 by default. `--limit`, `-n`, and `CO_LIMIT` set how many. The first row is the session `--resume latest` would open. Each row is the id, the last update time in UTC, the latest model, and the title. The transcript stores a title with the first prompt: the first line, at most ten words. After the reply, the model replaces that with a short name.
 
 ## What the model can do
 

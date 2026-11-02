@@ -18,12 +18,13 @@ const previewRunes = 60
 // Summary is one saved session for a directory.
 // Updated is the transcript file's modification time.
 // Model is the latest model, after any model-change records.
-// Preview is the first user message, collapsed onto one line.
+// Title is the stored session name. When the transcript has none, it is the
+// first line of the first prompt, at most ten words.
 type Summary struct {
 	ID      string
 	Updated time.Time
 	Model   string
-	Preview string
+	Title   string
 }
 
 // List returns up to limit saved sessions for cwd, newest first.
@@ -117,12 +118,30 @@ func readSummary(path, id, cwd string, updated time.Time) (Summary, error) {
 	if err != nil {
 		return Summary{}, err
 	}
+	title := parsed.title
+	if title == "" {
+		title = FallbackTitle(firstUserText(parsed.messages))
+	}
 	return Summary{
 		ID:      id,
 		Updated: updated,
 		Model:   parsed.model,
-		Preview: oneLine(firstUserText(parsed.messages)),
+		Title:   oneLine(title),
 	}, nil
+}
+
+const fallbackWords = 10
+
+// FallbackTitle is the first line of a prompt, at most ten words.
+func FallbackTitle(text string) string {
+	if i := strings.IndexAny(text, "\r\n"); i >= 0 {
+		text = text[:i]
+	}
+	words := strings.Fields(text)
+	if len(words) > fallbackWords {
+		words = words[:fallbackWords]
+	}
+	return strings.Join(words, " ")
 }
 
 func firstUserText(messages []openai.Message) string {

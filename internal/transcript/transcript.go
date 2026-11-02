@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kevinjom/co/internal/openai"
@@ -27,6 +28,8 @@ type Writer struct {
 	started time.Time
 	file    *os.File
 	seq     int
+	closed  bool
+	mu      sync.Mutex
 }
 
 type sessionHeader struct {
@@ -53,6 +56,14 @@ type modelRecord struct {
 	Seq   int    `json:"seq"`
 	TS    string `json:"ts"`
 	Model string `json:"model"`
+}
+
+type titleRecord struct {
+	Type  string `json:"type"`
+	V     int    `json:"v"`
+	Seq   int    `json:"seq"`
+	TS    string `json:"ts"`
+	Title string `json:"title"`
 }
 
 // Open prepares a session file under home/.co/projects/<project>/sessions.
@@ -117,6 +128,8 @@ func (w *Writer) Persisted() bool {
 	if w == nil {
 		return false
 	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.file != nil {
 		return true
 	}
@@ -135,39 +148,66 @@ func newSessionID(now time.Time) (string, error) {
 // Record appends one completed message.
 // interrupted marks an assistant message cut short by cancellation.
 func (w *Writer) Record(msg openai.Message, interrupted bool) error {
-	if err := w.ensure(); err != nil {
-		return err
-	}
-	w.seq++
-	rec := messageRecord{
-		Type:        "message",
-		V:           version,
-		Seq:         w.seq,
-		TS:          time.Now().UTC().Format(time.RFC3339Nano),
-		Interrupted: interrupted,
-		Message:     msg,
-	}
-	if err := w.writeLine(rec); err != nil {
-		return err
-	}
-	return nil
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writeRecord(func(seq int) any {
+		return messageRecord{
+			Type:        "message",
+			V:           version,
+			Seq:         seq,
+			TS:          time.Now().UTC().Format(time.RFC3339Nano),
+			Interrupted: interrupted,
+			Message:     msg,
+		}
+	})
 }
 
 // RecordModel appends one model-change line.
 // The session header keeps the model from Open and is not rewritten.
 func (w *Writer) RecordModel(model string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writeRecord(func(seq int) any {
+		return modelRecord{
+			Type:  "model",
+			V:     version,
+			Seq:   seq,
+			TS:    time.Now().UTC().Format(time.RFC3339Nano),
+			Model: model,
+		}
+	})
+}
+
+// RecordTitle appends the generated name of this session.
+// The header is not rewritten. An empty title writes nothing.
+func (w *Writer) RecordTitle(title string) error {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writeRecord(func(seq int) any {
+		return titleRecord{
+			Type:  "title",
+			V:     version,
+			Seq:   seq,
+			TS:    time.Now().UTC().Format(time.RFC3339Nano),
+			Title: title,
+		}
+	})
+}
+
+// writeRecord assumes w.mu is held.
+func (w *Writer) writeRecord(build func(seq int) any) error {
+	if w.closed {
+		return fmt.Errorf("session history: closed")
+	}
 	if err := w.ensure(); err != nil {
 		return err
 	}
 	w.seq++
-	rec := modelRecord{
-		Type:  "model",
-		V:     version,
-		Seq:   w.seq,
-		TS:    time.Now().UTC().Format(time.RFC3339Nano),
-		Model: model,
-	}
-	return w.writeLine(rec)
+	return w.writeLine(build(w.seq))
 }
 
 func (w *Writer) ensure() error {
@@ -222,9 +262,15 @@ func (w *Writer) writeLine(v any) error {
 
 // Close closes the file. It is safe before any Record.
 func (w *Writer) Close() error {
-	if w == nil || w.file == nil {
+	if w == nil {
 		return nil
 	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return nil
+	}
+	w.closed = true
 	err := w.file.Close()
 	w.file = nil
 	return err

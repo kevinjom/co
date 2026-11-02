@@ -98,7 +98,7 @@ func writeSessionList(w io.Writer, sessions []transcript.Summary) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "ID\tUPDATED\tMODEL\tPREVIEW"); err != nil {
+	if _, err := fmt.Fprintln(tw, "ID\tUPDATED\tMODEL\tTITLE"); err != nil {
 		return err
 	}
 	for _, session := range sessions {
@@ -108,7 +108,7 @@ func writeSessionList(w io.Writer, sessions []transcript.Summary) error {
 			session.ID,
 			session.Updated.UTC().Format(time.RFC3339),
 			session.Model,
-			session.Preview,
+			session.Title,
 		); err != nil {
 			return err
 		}

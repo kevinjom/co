@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/kevinjom/co/internal/openai"
 	"github.com/kevinjom/co/internal/tools"
@@ -42,6 +43,7 @@ type Session struct {
 	defs     []openai.Tool
 	messages []openai.Message
 	recorder Recorder
+	titleWG  sync.WaitGroup
 }
 
 // NewSession starts a conversation rooted at cwd.
@@ -89,8 +91,19 @@ func (s *Session) Messages() []openai.Message {
 // On a model error the user line stays in the session.
 // When the turn is canceled after some text has arrived, that partial answer is kept too.
 func (s *Session) Turn(ctx context.Context, userText string, observe Observer) (string, error) {
+	first := !hasUserMessage(s.messages)
 	s.remember(openai.Message{Role: "user", Content: userText}, false)
+	if first {
+		s.storeFallbackTitle(userText)
+	}
+	answer, err := s.converse(ctx, observe)
+	if first && err == nil {
+		s.refineTitle(userText)
+	}
+	return answer, err
+}
 
+func (s *Session) converse(ctx context.Context, observe Observer) (string, error) {
 	for range maxToolRounds {
 		msg, err := s.complete(ctx, s.defs, observe)
 		if err != nil {
@@ -179,6 +192,15 @@ func (s *Session) runTools(ctx context.Context, calls []openai.ToolCall, observe
 			ToolCallID: call.ID,
 		}, false)
 	}
+}
+
+func hasUserMessage(messages []openai.Message) bool {
+	for _, msg := range messages {
+		if msg.Role == "user" {
+			return true
+		}
+	}
+	return false
 }
 
 func systemPrompt(cwd string) string {

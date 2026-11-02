@@ -163,6 +163,10 @@ func TestPipedTurnSeparatesAnswerAndToolTrace(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/v1/chat/completions":
+			if isTitleRequest(body) {
+				writeSSE(w, contentChunk("Count the lines"))
+				return
+			}
 			var payload struct {
 				Tools  []any `json:"tools"`
 				Stream bool  `json:"stream"`
@@ -285,10 +289,19 @@ func TestSlashModelsIsNotATurn(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/chat/completions":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read body: %v", err)
+				return
+			}
+			if isTitleRequest(body) {
+				writeSSE(w, contentChunk("A short title"))
+				return
+			}
 			var payload struct {
 				Model string `json:"model"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			if err := json.Unmarshal(body, &payload); err != nil {
 				t.Errorf("decode: %v", err)
 				return
 			}
@@ -386,10 +399,19 @@ func TestSlashModelsSwitchesAndPersists(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/chat/completions":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read body: %v", err)
+				return
+			}
+			if isTitleRequest(body) {
+				writeSSE(w, contentChunk("A short title"))
+				return
+			}
 			var payload struct {
 				Model string `json:"model"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			if err := json.Unmarshal(body, &payload); err != nil {
 				t.Errorf("decode: %v", err)
 				return
 			}
@@ -470,6 +492,15 @@ func TestExitPrintsResumeAndContinueKeepsTheSession(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/chat/completions":
+			raw, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read body: %v", err)
+				return
+			}
+			if isTitleRequest(raw) {
+				writeSSE(w, contentChunk("A short title"))
+				return
+			}
 			var body struct {
 				Model    string `json:"model"`
 				Messages []struct {
@@ -477,7 +508,7 @@ func TestExitPrintsResumeAndContinueKeepsTheSession(t *testing.T) {
 					Content string `json:"content"`
 				} `json:"messages"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.Unmarshal(raw, &body); err != nil {
 				t.Errorf("decode: %v", err)
 				return
 			}
@@ -934,9 +965,6 @@ func assertSessionRoles(t *testing.T, roles ...string) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
-	if len(lines) != len(roles)+1 {
-		t.Fatalf("lines = %d, file %s", len(lines), data)
-	}
 	var header struct {
 		Type string `json:"type"`
 	}
@@ -946,20 +974,57 @@ func assertSessionRoles(t *testing.T, roles ...string) {
 	if header.Type != "session" {
 		t.Fatalf("header %s", lines[0])
 	}
-	for i, role := range roles {
+	var got []string
+	prevSeq := 0
+	for i, line := range lines[1:] {
+		var kind struct {
+			Type string `json:"type"`
+			Seq  int    `json:"seq"`
+		}
+		if err := json.Unmarshal([]byte(line), &kind); err != nil {
+			t.Fatal(err)
+		}
+		if kind.Seq <= prevSeq {
+			t.Fatalf("line %d seq %d", i+2, kind.Seq)
+		}
+		prevSeq = kind.Seq
+		if kind.Type == "title" {
+			continue
+		}
+		if kind.Type != "message" {
+			t.Fatalf("line %d type %s", i+2, kind.Type)
+		}
 		var rec struct {
-			Seq     int `json:"seq"`
 			Message struct {
 				Role string `json:"role"`
 			} `json:"message"`
 		}
-		if err := json.Unmarshal([]byte(lines[i+1]), &rec); err != nil {
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			t.Fatal(err)
 		}
-		if rec.Seq != i+1 || rec.Message.Role != role {
-			t.Fatalf("line %d seq %d role %q", i+1, rec.Seq, rec.Message.Role)
+		got = append(got, rec.Message.Role)
+	}
+	if strings.Join(got, ",") != strings.Join(roles, ",") {
+		t.Fatalf("roles %v want %v file %s", got, roles, data)
+	}
+}
+
+func isTitleRequest(body []byte) bool {
+	var payload struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	for _, msg := range payload.Messages {
+		if msg.Role == "system" && strings.Contains(msg.Content, "Reply with a short title") {
+			return true
 		}
 	}
+	return false
 }
 
 func TestSessionListWritesNewestFirst(t *testing.T) {
@@ -1164,7 +1229,7 @@ func sessionRows(t *testing.T, stdout string) []string {
 	}
 	lines := strings.Split(text, "\n")
 	header := lines[0]
-	for _, column := range []string{"ID", "UPDATED", "MODEL", "PREVIEW"} {
+	for _, column := range []string{"ID", "UPDATED", "MODEL", "TITLE"} {
 		if !strings.Contains(header, column) {
 			t.Fatalf("header %q", header)
 		}

@@ -116,6 +116,7 @@ func Resume(home, cwd, id string) (*Loaded, error) {
 type parsedSession struct {
 	headerModel string
 	model       string
+	title       string
 	messages    []openai.Message
 	seq         int
 	kept        int
@@ -202,6 +203,16 @@ func applyRecord(line []byte, parsed *parsedSession) (parsedSession, error) {
 			return parsedSession{}, fmt.Errorf("model is empty")
 		}
 		next.model = rec.Model
+		return next, nil
+	case "title":
+		var rec titleRecord
+		if err := json.Unmarshal(line, &rec); err != nil {
+			return parsedSession{}, err
+		}
+		if strings.TrimSpace(rec.Title) == "" {
+			return parsedSession{}, fmt.Errorf("title is empty")
+		}
+		next.title = rec.Title
 		return next, nil
 	default:
 		return parsedSession{}, fmt.Errorf("unknown record %q", kind.Type)

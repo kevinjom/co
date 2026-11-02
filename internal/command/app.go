@@ -139,8 +139,11 @@ func (a *App) ExitNote() string {
 	return "resume with: co --resume " + a.history.ID()
 }
 
-// Close closes the session transcript.
+// Close waits for a chat title, then closes the session transcript.
 func (a *App) Close() {
+	if a.session != nil {
+		a.session.Wait()
+	}
 	if a.history == nil {
 		return
 	}

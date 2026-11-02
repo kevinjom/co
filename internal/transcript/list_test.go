@@ -45,13 +45,13 @@ func TestListReturnsNewestFirst(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("sessions = %d", len(got))
 	}
-	if got[0].ID != newer.ID() || got[0].Model != "openrouter/qwen/qwen3-coder" || got[0].Preview != "new prompt" {
+	if got[0].ID != newer.ID() || got[0].Model != "openrouter/qwen/qwen3-coder" || got[0].Title != "new prompt" {
 		t.Fatalf("newest %+v", got[0])
 	}
 	if !got[0].Updated.Equal(now) {
 		t.Fatalf("updated %s", got[0].Updated)
 	}
-	if got[1].ID != older.ID() || got[1].Preview != "old prompt" || got[1].Model != "ollama/first" {
+	if got[1].ID != older.ID() || got[1].Title != "old" || got[1].Model != "ollama/first" {
 		t.Fatalf("older %+v", got[1])
 	}
 
@@ -144,7 +144,7 @@ func TestListSkipsACorruptFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].ID != good.ID() || got[0].Preview != "keep me" {
+	if len(got) != 1 || got[0].ID != good.ID() || got[0].Title != "keep me" {
 		t.Fatalf("sessions %+v", got)
 	}
 	if !strings.Contains(logs.String(), "broken") {
@@ -152,21 +152,52 @@ func TestListSkipsACorruptFile(t *testing.T) {
 	}
 }
 
-func TestListTruncatesThePreview(t *testing.T) {
+func TestListUsesTheFirstLineWhenThereIsNoTitle(t *testing.T) {
 	home := t.TempDir()
 	dir := t.TempDir()
-	text := strings.Repeat("你", previewRunes+5)
-	writeSession(t, home, dir, "m", text)
+	prompt := "one two three four five six seven eight nine ten eleven twelve"
+	writeSession(t, home, dir, "m", prompt+"\nmore words")
 	got, err := List(home, dir, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("sessions %+v", got)
+	if len(got) != 1 || got[0].Title != "one two three four five six seven eight nine ten" {
+		t.Fatalf("title %q", got[0].Title)
 	}
-	want := strings.Repeat("你", previewRunes-len("...")) + "..."
-	if got[0].Preview != want {
-		t.Fatalf("preview %q", got[0].Preview)
+}
+
+func TestListPrefersTheStoredTitle(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	w, err := Open(home, dir, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(openai.Message{Role: "user", Content: "please fix the parser and add tests"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.RecordTitle("Fix the parser"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := List(home, dir, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Title != "Fix the parser" {
+		t.Fatalf("title %+v", got)
+	}
+
+	loaded, err := Resume(home, dir, w.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loaded.Writer.Close()
+	if len(loaded.Messages) != 1 || loaded.Messages[0].Content != "please fix the parser and add tests" {
+		t.Fatalf("messages %+v", loaded.Messages)
 	}
 }
 

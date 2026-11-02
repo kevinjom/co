@@ -44,6 +44,9 @@ type Session struct {
 	messages []openai.Message
 	recorder Recorder
 	titleWG  sync.WaitGroup
+	titleMu  sync.Mutex
+	title    string
+	onTitle  func(string)
 }
 
 // NewSession starts a conversation rooted at cwd.

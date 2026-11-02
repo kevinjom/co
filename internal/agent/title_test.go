@@ -38,8 +38,8 @@ func TestFirstTurnStoresATitle(t *testing.T) {
 		t.Fatalf("answer %q", got)
 	}
 	session.Wait()
-	if rec.title != "Fix the parser" {
-		t.Fatalf("title %q", rec.title)
+	if rec.title != "Fix the parser" || session.Title() != "Fix the parser" {
+		t.Fatalf("title %q session %q", rec.title, session.Title())
 	}
 	if _, err := session.Turn(t.Context(), "next", nil); err != nil {
 		t.Fatal(err)

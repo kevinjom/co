@@ -150,6 +150,7 @@ func (a *App) Resume(ctx context.Context, id, model string) error {
 	}
 	session := agent.NewSession(client, wire, a.cwd, recorder)
 	session.Restore(loaded.Messages)
+	session.SetTitle(loaded.Title)
 	a.running = append(a.running, running{session: session, history: history})
 	a.model = ref
 	if ref != loaded.Model {

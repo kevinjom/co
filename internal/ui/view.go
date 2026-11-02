@@ -189,11 +189,8 @@ func (m *model) sessionPanel() string {
 	indexes := m.panelIndexes(height - 1)
 	for _, index := range indexes {
 		item := m.tabs[index]
-		mark := statusMark(item.state)
-		if item.state == statusWorking {
-			mark = m.spin.View()
-		}
-		rest := " " + item.state.label() + " " + item.title
+		mark := m.statusIcon(item.state)
+		rest := " " + item.title
 		room := inner - lipgloss.Width(mark)
 		if room < 1 {
 			room = 1
@@ -213,6 +210,23 @@ func (m *model) sessionPanel() string {
 		rows = append(rows, m.panelLine(m.theme.dim, "", inner))
 	}
 	return strings.Join(rows, "\n")
+}
+
+func (m *model) statusIcon(state sessionStatus) string {
+	if state == statusWorking {
+		return m.spin.View()
+	}
+	mark := statusMark(state)
+	switch state {
+	case statusDone:
+		return m.theme.good.Render(mark)
+	case statusInterrupted:
+		return m.theme.warn.Render(mark)
+	case statusError:
+		return m.theme.bad.Render(mark)
+	default:
+		return m.theme.dim.Render(mark)
+	}
 }
 
 func (m *model) panelIndexes(height int) []int {

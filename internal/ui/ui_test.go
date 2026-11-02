@@ -809,3 +809,47 @@ func TestNarrowTerminalHidesTheSessionPanel(t *testing.T) {
 		t.Fatalf("panel shown: %q", plain)
 	}
 }
+
+func TestSessionTitleUpdatesThePanel(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().session.Restore([]openai.Message{{Role: "user", Content: "how many lines are in this file?"}})
+	cmd := m.watchTitle(m.tab())
+	if cmd == nil {
+		t.Fatal("expected a title watch")
+	}
+	m.tab().session.SetTitle("Count the lines")
+	renamed, ok := cmd().(titleMsg)
+	if !ok || renamed.title != "Count the lines" {
+		t.Fatalf("msg %#v", cmd)
+	}
+	updated, next := m.Update(renamed)
+	got := updated.(*model)
+	plain := ansi.Strip(got.sessionPanel())
+	if got.tab().title != "Count the lines" || !strings.Contains(plain, "Count the lines") || strings.Contains(plain, "how many lines") {
+		t.Fatalf("panel %q", plain)
+	}
+	if strings.Contains(plain, "done") || strings.Contains(plain, "new") {
+		t.Fatalf("status word in %q", plain)
+	}
+	if next == nil {
+		t.Fatal("stopped watching the title")
+	}
+}
+
+func TestWorkingStatusAnimates(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().busy = true
+	m.tab().state = statusWorking
+	m.tab().title = "Count the lines"
+	plain := ansi.Strip(m.sessionPanel())
+	first := ansi.Strip(m.spin.View())
+	if strings.Contains(plain, "working") || first == "" || !strings.Contains(plain, first) {
+		t.Fatalf("icon %q panel %q", first, plain)
+	}
+	updated, cmd := m.Update(m.spin.Tick())
+	got := updated.(*model)
+	second := ansi.Strip(got.spin.View())
+	if second == "" || second == first || !strings.Contains(ansi.Strip(got.sessionPanel()), second) || cmd == nil {
+		t.Fatalf("frame %q -> %q cmd %v", first, second, cmd != nil)
+	}
+}

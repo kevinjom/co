@@ -132,7 +132,7 @@ With no model selected, a terminal opens the model picker. Anything else exits a
 
 `/new` and `/sessions` are TUI commands. The line reader keeps a single session.
 
-In the TUI, Tab completes `/models`, `/connect`, `/new`, and `/sessions`. Enter sends, Ctrl+J inserts a newline, and Ctrl+C quits. The transcript fills the terminal, with a session list on the right when the terminal is at least 60 columns wide. Each row is a status (`new`, `working`, `done`, `interrupted`, or `error`) and the first line of that session's first prompt. The list is only the sessions opened in this TUI. The mouse wheel, trackpad, PgUp, and PgDn scroll the transcript, and it stays pinned to the bottom until you scroll up. Ctrl+C during a turn stops that turn. Other sessions keep going. Ctrl+C while the session on screen is idle quits.
+In the TUI, Tab completes `/models`, `/connect`, `/new`, and `/sessions`. Enter sends, Ctrl+J inserts a newline, and Ctrl+C quits. The transcript fills the terminal, with a session list on the right when the terminal is at least 60 columns wide. Each row is a status icon and the session title. The icon animates while that session is working. The list is only the sessions opened in this TUI. The mouse wheel, trackpad, PgUp, and PgDn scroll the transcript, and it stays pinned to the bottom until you scroll up. Ctrl+C during a turn stops that turn. Other sessions keep going. Ctrl+C while the session on screen is idle quits.
 
 When stdin or stdout is not a terminal, the prompt is `> ` on stderr. The answer is written to stdout. Reasoning and tool lines go to stderr.
 

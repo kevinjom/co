@@ -113,7 +113,7 @@ func (m *model) onSelected(msg selectDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m.layout()
 	m.paint()
-	return m, m.input.Focus()
+	return m, tea.Batch(m.input.Focus(), m.watchTitle(m.tab()))
 }
 
 func (m *model) openProviders() tea.Cmd {

@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/kevinjom/co/internal/agent"
-	"github.com/kevinjom/co/internal/transcript"
 )
 
 const newSessionTitle = "New session"
@@ -21,23 +20,6 @@ const (
 	statusInterrupted
 	statusError
 )
-
-func (s sessionStatus) label() string {
-	switch s {
-	case statusNew:
-		return "new"
-	case statusWorking:
-		return "working"
-	case statusDone:
-		return "done"
-	case statusInterrupted:
-		return "interrupted"
-	case statusError:
-		return "error"
-	default:
-		return ""
-	}
-}
 
 func statusMark(s sessionStatus) string {
 	switch s {
@@ -71,6 +53,8 @@ type tab struct {
 	draft         string
 	offset        int
 	follow        bool
+	titleWatch    bool
+	titleCh       chan string
 	answered      bool
 	answerOpen    bool
 	reasoningOpen bool
@@ -85,24 +69,27 @@ func newTab(id int, session *agent.Session) tab {
 		state:   statusNew,
 		follow:  true,
 	}
-	if title := sessionTitle(session); title != "" {
-		item.title = title
-		item.state = statusDone
+	if session != nil {
+		if title := session.Title(); title != "" {
+			item.title = title
+		}
+		if sessionHasUser(session) {
+			item.state = statusDone
+		}
 	}
 	return item
 }
 
-func sessionTitle(session *agent.Session) string {
+func sessionHasUser(session *agent.Session) bool {
 	if session == nil {
-		return ""
+		return false
 	}
 	for _, msg := range session.Messages() {
-		if msg.Role != "user" {
-			continue
+		if msg.Role == "user" {
+			return true
 		}
-		return transcript.FallbackTitle(msg.Content)
 	}
-	return ""
+	return false
 }
 
 func (m *model) tab() *tab {
@@ -170,12 +157,38 @@ func (m *model) switchTo(index int) {
 	}
 }
 
-func (item *tab) nameFromPrompt(text string) {
-	if item.title != newSessionTitle {
-		return
+func (m *model) watchTitle(item *tab) tea.Cmd {
+	if item == nil || item.session == nil || item.titleWatch {
+		return nil
 	}
-	if title := transcript.FallbackTitle(text); title != "" {
-		item.title = title
+	item.titleWatch = true
+	ch := make(chan string, 1)
+	item.titleCh = ch
+	id := item.id
+	item.session.NotifyTitle(func(title string) {
+		select {
+		case ch <- title:
+		default:
+			select {
+			case <-ch:
+			default:
+			}
+			select {
+			case ch <- title:
+			default:
+			}
+		}
+	})
+	return waitTitle(id, ch)
+}
+
+func waitTitle(id int, ch <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		title, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return titleMsg{tabID: id, title: title}
 	}
 }
 

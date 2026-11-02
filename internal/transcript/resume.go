@@ -35,6 +35,7 @@ func inputf(format string, args ...any) error {
 type Loaded struct {
 	Writer   *Writer
 	Model    string
+	Title    string
 	Messages []openai.Message
 }
 
@@ -99,6 +100,10 @@ func Resume(home, cwd, id string) (*Loaded, error) {
 		return nil, fmt.Errorf("session history: %w", err)
 	}
 
+	title := parsed.title
+	if title == "" {
+		title = FallbackTitle(firstUserText(parsed.messages))
+	}
 	return &Loaded{
 		Writer: &Writer{
 			path:  path,
@@ -109,6 +114,7 @@ func Resume(home, cwd, id string) (*Loaded, error) {
 			seq:   parsed.seq,
 		},
 		Model:    parsed.model,
+		Title:    title,
 		Messages: parsed.messages,
 	}, nil
 }

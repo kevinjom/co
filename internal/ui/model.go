@@ -68,6 +68,11 @@ type openedMsg struct {
 	err     error
 }
 
+type titleMsg struct {
+	tabID int
+	title string
+}
+
 type inputMode int
 
 const (
@@ -207,10 +212,18 @@ func newInput(th theme) textarea.Model {
 }
 
 func (m *model) Init() tea.Cmd {
+	cmds := []tea.Cmd{tea.RequestBackgroundColor}
 	if m.mode == modeModels {
-		return tea.Batch(m.fetchModels(), tea.RequestBackgroundColor)
+		cmds = append(cmds, m.fetchModels())
+	} else {
+		cmds = append(cmds, m.input.Focus())
 	}
-	return tea.Batch(m.input.Focus(), tea.RequestBackgroundColor)
+	for i := range m.tabs {
+		if cmd := m.watchTitle(&m.tabs[i]); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -258,6 +271,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case openedMsg:
 		return m.onOpened(msg)
+
+	case titleMsg:
+		return m, m.onTitle(msg)
 
 	case spinner.TickMsg:
 		if !m.anyBusy() {
@@ -460,7 +476,6 @@ func (m *model) submit() tea.Cmd {
 	m.input.Blur()
 	spinning := m.anyBusy()
 	item := m.tab()
-	item.nameFromPrompt(text)
 	item.busy = true
 	item.state = statusWorking
 	item.activity = "thinking"
@@ -524,7 +539,18 @@ func (m *model) onOpened(msg openedMsg) (tea.Model, tea.Cmd) {
 		return m, m.input.Focus()
 	}
 	m.adoptSession(msg.session)
-	return m, m.input.Focus()
+	return m, tea.Batch(m.input.Focus(), m.watchTitle(m.tab()))
+}
+
+func (m *model) onTitle(msg titleMsg) tea.Cmd {
+	item := m.tabByID(msg.tabID)
+	if item == nil || item.titleCh == nil {
+		return nil
+	}
+	if msg.title != "" && msg.title != item.title {
+		item.title = msg.title
+	}
+	return waitTitle(item.id, item.titleCh)
 }
 
 func (m *model) finishTurn(msg turnDoneMsg) (tea.Model, tea.Cmd) {

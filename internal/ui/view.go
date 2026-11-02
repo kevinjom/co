@@ -135,10 +135,10 @@ func (m *model) statusLine() string {
 }
 
 func (m *model) helpLine() string {
-	text := "enter send  ·  ctrl+j newline  ·  pgup/pgdn scroll  ·  ctrl+c quit"
+	text := "enter send  ·  ctrl+j newline  ·  wheel/pgup/pgdn scroll  ·  ctrl+c quit"
 	switch {
 	case m.busy:
-		text = "ctrl+c stop  ·  pgup/pgdn scroll"
+		text = "ctrl+c stop  ·  wheel/pgup/pgdn scroll"
 	case (m.mode == modeModels || m.mode == modeProviders) && m.session == nil:
 		text = "enter select  ·  esc quit  ·  up/down move"
 	case m.mode == modeModels || m.mode == modeProviders:
@@ -153,6 +153,40 @@ func (m *model) helpLine() string {
 		text = ansi.Truncate(text, width, "…")
 	}
 	return m.theme.dim.Render(text)
+}
+
+func (m *model) transcriptView() string {
+	body := m.viewport.View()
+	bar := m.scrollBar()
+	if bar == "" {
+		return body
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, body, bar)
+}
+
+func (m *model) scrollBar() string {
+	height := m.viewport.Height()
+	total := m.viewport.TotalLineCount()
+	if height <= 0 || total <= height {
+		return ""
+	}
+	thumb := max(1, height*height/total)
+	maxOffset := total - height
+	offset := m.viewport.YOffset()
+	track := height - thumb
+	pos := 0
+	if track > 0 && maxOffset > 0 {
+		pos = min(track, offset*track/maxOffset)
+	}
+	lines := make([]string, height)
+	for i := range lines {
+		if i >= pos && i < pos+thumb {
+			lines[i] = m.theme.accent.Render("┃")
+		} else {
+			lines[i] = m.theme.dim.Render("│")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *model) renderTranscript() string {

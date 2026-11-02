@@ -30,11 +30,14 @@ func press(code rune, mod tea.KeyMod) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: code, Mod: mod}
 }
 
-func TestViewIsInline(t *testing.T) {
+func TestViewFillsTheTerminal(t *testing.T) {
 	m := newTestModel(t)
 	view := m.View()
-	if view.AltScreen {
-		t.Fatal("alt screen enabled")
+	if !view.AltScreen {
+		t.Fatal("alt screen disabled")
+	}
+	if view.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode %d", view.MouseMode)
 	}
 	plain := ansi.Strip(view.Content)
 	if !strings.Contains(plain, "co") || !strings.Contains(plain, "Ask about this directory") {
@@ -54,6 +57,27 @@ func TestViewIsInline(t *testing.T) {
 	}
 	if h := lipgloss.Height(view.Content); h != 24 {
 		t.Fatalf("height %d\n%s", h, plain)
+	}
+}
+
+func TestForgetScrollback(t *testing.T) {
+	var buf strings.Builder
+	forgetScrollback(&buf, "iTerm.app")
+	if !strings.Contains(buf.String(), "\x1b[3J") || !strings.Contains(buf.String(), "1337;ClearScrollback") {
+		t.Fatalf("%q", buf.String())
+	}
+	buf.Reset()
+	forgetScrollback(&buf, "Apple_Terminal")
+	if strings.Contains(buf.String(), "1337") || !strings.Contains(buf.String(), "\x1b[3J") {
+		t.Fatalf("%q", buf.String())
+	}
+}
+
+func TestFocusRepaints(t *testing.T) {
+	m := newTestModel(t)
+	_, cmd := m.Update(tea.FocusMsg{})
+	if cmd == nil {
+		t.Fatal("expected a repaint")
 	}
 }
 
@@ -600,6 +624,61 @@ func TestResumeRendersPriorTurns(t *testing.T) {
 	}
 	if strings.Contains(plain, "Ask about this directory") {
 		t.Fatal("welcome replaced the resumed transcript")
+	}
+}
+
+func TestWheelScrollsALineAtATime(t *testing.T) {
+	m := newTestModel(t)
+	lines := make([]string, 80)
+	for i := range lines {
+		lines[i] = "row"
+	}
+	m.blocks = []block{{kind: blockNote, text: strings.Join(lines, "\n")}}
+	m.layout()
+	m.paint()
+	if !m.viewport.AtBottom() || m.viewport.YOffset() == 0 {
+		t.Fatalf("offset %d bottom %v", m.viewport.YOffset(), m.viewport.AtBottom())
+	}
+	bottom := m.viewport.YOffset()
+	updated, _ := m.Update(tea.MouseWheelMsg{Y: 2, Button: tea.MouseWheelUp})
+	got := updated.(*model)
+	if got.viewport.YOffset() != bottom-1 || got.viewport.AtBottom() {
+		t.Fatalf("offset %d bottom %v", got.viewport.YOffset(), got.viewport.AtBottom())
+	}
+	plain := ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "pgdn to follow") || !strings.Contains(plain, "┃") {
+		t.Fatalf("view %q", plain)
+	}
+	if lipgloss.Width(got.View().Content) > 80 {
+		t.Fatalf("width %d", lipgloss.Width(got.View().Content))
+	}
+
+	y := lipgloss.Height(got.headerLine()) + got.viewport.Height()
+	offset := got.viewport.YOffset()
+	updated, _ = got.Update(tea.MouseWheelMsg{Y: y, Button: tea.MouseWheelUp})
+	got = updated.(*model)
+	if got.viewport.YOffset() != offset {
+		t.Fatalf("wheel over the composer moved the transcript to %d", got.viewport.YOffset())
+	}
+
+	updated, _ = got.Update(tea.MouseWheelMsg{Y: 2, Button: tea.MouseWheelDown})
+	got = updated.(*model)
+	if !got.viewport.AtBottom() {
+		t.Fatal("wheel down should pin to the bottom again")
+	}
+}
+
+func TestWheelMovesThePicker(t *testing.T) {
+	m := newTestModel(t)
+	m.director = &fakeDirector{providers: []string{"gemini", "openrouter"}, session: m.session, ready: true}
+	m.input.SetValue("/connect")
+	updated, _ := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	updated, _ = got.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	got = updated.(*model)
+	plain := ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "> openrouter") || strings.Contains(plain, "> gemini") {
+		t.Fatalf("picker %q", plain)
 	}
 }
 

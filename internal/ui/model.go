@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -14,6 +15,8 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/term"
 
 	"github.com/kevinjom/co/internal/agent"
 	"github.com/kevinjom/co/internal/command"
@@ -67,8 +70,9 @@ const (
 	modeConnect
 )
 
-// model is the interactive session. The program stays in Bubble Tea's default
-// inline mode: View is redrawn in place, and history scrolls inside the viewport.
+// model is the interactive session. The program takes the whole terminal.
+// The transcript scrolls inside that frame, a line at a time, and stays
+// pinned to the bottom until the user scrolls up.
 type model struct {
 	session   *agent.Session
 	director  Director
@@ -135,6 +139,8 @@ func newModel(ctx context.Context, session *agent.Session, modelName, cwd string
 		height:    24,
 	}
 	m.viewport.SoftWrap = true
+	// Wheel events are handled on the model so each tick moves one line,
+	// matching a terminal scrollback rather than the viewport's 3-line step.
 	m.viewport.MouseWheelEnabled = false
 	m.spin.Style = lipgloss.NewStyle().Foreground(th.accentColor)
 	m.blocks = historyBlocks(session)
@@ -208,6 +214,11 @@ func (m *model) Init() tea.Cmd {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.FocusMsg:
+		// A terminal search can scroll an older buffer into view and leave
+		// the frame painted over it. Focusing again redraws from the origin.
+		return m, func() tea.Msg { return tea.ClearScreen() }
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -228,6 +239,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
+
+	case tea.MouseWheelMsg:
+		return m.onWheel(msg)
 
 	case tea.PasteMsg:
 		return m.onPaste(msg.Content)
@@ -622,11 +636,82 @@ func (m *model) addBlock(b block) {
 	m.paint()
 }
 
+func (m *model) onWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	switch m.mode {
+	case modeModels, modeProviders:
+		m.wheelPicker(msg.Button)
+		return m, nil
+	case modeConnect:
+		return m, nil
+	case modeChat:
+		return m.wheelChat(msg)
+	default:
+		panic(fmt.Sprintf("unhandled input mode %d", m.mode))
+	}
+}
+
+func (m *model) wheelPicker(button tea.MouseButton) {
+	switch wheelLines(button) {
+	case -1:
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case 1:
+		if m.cursor+1 < len(m.pickerIDs()) {
+			m.cursor++
+		}
+	}
+}
+
+func (m *model) wheelChat(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	lines := wheelLines(msg.Button)
+	if lines == 0 {
+		return m, nil
+	}
+	if m.pointerOverInput(msg.Y) && !m.busy {
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		m.layout()
+		return m, cmd
+	}
+	if lines < 0 {
+		m.viewport.ScrollUp(-lines)
+	} else {
+		m.viewport.ScrollDown(lines)
+	}
+	return m, nil
+}
+
+func wheelLines(button tea.MouseButton) int {
+	switch button {
+	case tea.MouseWheelUp:
+		return -1
+	case tea.MouseWheelDown:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// pointerOverInput reports whether y is on the composer rather than the transcript.
+func (m *model) pointerOverInput(y int) bool {
+	top := lipgloss.Height(m.headerLine()) + m.viewport.Height()
+	if extra := m.overlayView(); extra != "" {
+		top += lipgloss.Height(extra)
+	}
+	return y >= top
+}
+
 func (m *model) paint() {
 	m.dirty = false
 	m.lastPaint = time.Now()
 	follow := m.viewport.AtBottom()
+	m.viewport.SetWidth(m.usableWidth())
 	m.viewport.SetContent(m.renderTranscript())
+	if m.transcriptOverflows() && m.usableWidth() > 1 {
+		m.viewport.SetWidth(m.usableWidth() - 1)
+		m.viewport.SetContent(m.renderTranscript())
+	}
 	if follow {
 		m.viewport.GotoBottom()
 	}
@@ -654,11 +739,23 @@ func (m *model) layout() {
 		vpH = 1
 	}
 	follow := m.viewport.AtBottom()
-	m.viewport.SetWidth(width)
 	m.viewport.SetHeight(vpH)
+	m.viewport.SetWidth(m.transcriptWidth())
 	if follow {
 		m.viewport.GotoBottom()
 	}
+}
+
+func (m *model) transcriptOverflows() bool {
+	return m.viewport.Height() > 0 && m.viewport.TotalLineCount() > m.viewport.Height()
+}
+
+func (m *model) transcriptWidth() int {
+	width := m.usableWidth()
+	if m.transcriptOverflows() && width > 1 {
+		return width - 1
+	}
+	return width
 }
 
 func (m *model) usableWidth() int {
@@ -682,13 +779,16 @@ func (m *model) View() tea.View {
 		return v
 	}
 
-	parts := []string{m.headerLine(), m.viewport.View()}
+	parts := []string{m.headerLine(), m.transcriptView()}
 	if extra := m.overlayView(); extra != "" {
 		parts = append(parts, extra)
 	}
 	parts = append(parts, m.inputView(), m.statusLine(), m.helpLine())
 	body := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	v := tea.NewView(body)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	v.ReportFocus = true
 	v.WindowTitle = "co"
 	v.ProgramStatus = m.programStatus()
 	return v
@@ -726,9 +826,9 @@ func waitEvent(ch <-chan tea.Msg) tea.Cmd {
 	}
 }
 
-// Run starts the interactive UI. Inline mode is Bubble Tea's default.
+// Run starts the interactive UI on the alternate screen.
 // When no model is selected yet, the model picker is open and esc quits.
-func Run(ctx context.Context, app Director, cwd string) error {
+func Run(ctx context.Context, app Director, cwd string, clearScrollback bool) error {
 	modelName := ""
 	var session *agent.Session
 	if app != nil && app.Ready() {
@@ -741,6 +841,9 @@ func Run(ctx context.Context, app Director, cwd string) error {
 		m.mode = modeModels
 		m.startup = true
 		m.layout()
+	}
+	if clearScrollback && term.IsTerminal(os.Stdout.Fd()) {
+		forgetScrollback(os.Stdout, os.Getenv("TERM_PROGRAM"))
 	}
 	final, err := tea.NewProgram(
 		m,
@@ -761,6 +864,16 @@ func Run(ctx context.Context, app Director, cwd string) error {
 		return ui.exitErr
 	}
 	return nil
+}
+
+// forgetScrollback drops the terminal scrollback before the alternate screen
+// is entered. iTerm's Find searches that buffer and, on a hit from before this
+// process, scrolls it into view underneath the fullscreen frame.
+func forgetScrollback(w io.Writer, termProgram string) {
+	_, _ = io.WriteString(w, ansi.EraseEntireDisplay)
+	if termProgram == "iTerm.app" {
+		_, _ = io.WriteString(w, "\x1b]1337;ClearScrollback\a")
+	}
 }
 
 func (m *model) announceExit() {

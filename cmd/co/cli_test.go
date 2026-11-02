@@ -65,6 +65,7 @@ func prepare(t *testing.T) {
 	t.Setenv("OLLAMA_HOST", "")
 	t.Setenv("CO_LOG_LEVEL", "")
 	t.Setenv("CO_NO_HISTORY", "")
+	t.Setenv("CO_CLEAR_SCROLLBACK", "")
 	t.Setenv("CO_RESUME", "")
 	t.Chdir(t.TempDir())
 	viper.Reset()
@@ -86,6 +87,33 @@ func startCLI(t *testing.T, stdin string, args ...string) (string, string, error
 	cmd.SetArgs(args)
 	runErr := cmd.ExecuteContext(context.Background())
 	return stdout.String(), stderr.String(), runErr
+}
+
+func TestClearScrollbackDefaultsOff(t *testing.T) {
+	prepare(t)
+	cmd, err := newRootCmd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	flag := cmd.Flags().Lookup("clear-scrollback")
+	if flag == nil || flag.DefValue != "false" {
+		t.Fatalf("flag %+v", flag)
+	}
+
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if viper.GetBool("clear-scrollback") {
+		t.Fatal("clear-scrollback defaulted on")
+	}
+
+	t.Setenv("CO_CLEAR_SCROLLBACK", "true")
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if !viper.GetBool("clear-scrollback") {
+		t.Fatal("CO_CLEAR_SCROLLBACK was ignored")
+	}
 }
 
 func TestVersionWritesToStdout(t *testing.T) {

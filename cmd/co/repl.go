@@ -17,9 +17,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func repl(cmd *cobra.Command, signals *signalSession, app *command.App, cwd string) error {
+func repl(cmd *cobra.Command, signals *signalSession, app *command.App, cwd string, clearScrollback bool) error {
 	if isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout()) {
-		err := ui.Run(signals.ctx, app, cwd)
+		err := ui.Run(signals.ctx, app, cwd, clearScrollback)
 		if err != nil && signals.ctx.Err() != nil {
 			return signals.err()
 		}

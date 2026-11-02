@@ -35,6 +35,7 @@ func newRootCmd() (*cobra.Command, error) {
 	cmd.Flags().String("model", "", "model as provider/model-id")
 	cmd.Flags().String("resume", "", "resume a session id, or latest")
 	cmd.Flags().Bool("no-history", false, "do not save the session transcript")
+	cmd.Flags().Bool("clear-scrollback", false, "erase the terminal scrollback before the TUI starts")
 
 	if err := bindFlag(cmd.PersistentFlags(), "config"); err != nil {
 		return nil, err
@@ -49,6 +50,9 @@ func newRootCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 	if err := bindFlag(cmd.Flags(), "no-history"); err != nil {
+		return nil, err
+	}
+	if err := bindFlag(cmd.Flags(), "clear-scrollback"); err != nil {
 		return nil, err
 	}
 
@@ -100,7 +104,11 @@ func initConfig(cmd *cobra.Command) error {
 	if err := viper.BindEnv("no-history", "CO_NO_HISTORY"); err != nil {
 		return fmt.Errorf("binding no-history: %w", err)
 	}
+	if err := viper.BindEnv("clear-scrollback", "CO_CLEAR_SCROLLBACK"); err != nil {
+		return fmt.Errorf("binding clear-scrollback: %w", err)
+	}
 	viper.SetDefault("log-level", "info")
+	viper.SetDefault("clear-scrollback", false)
 
 	if err := viper.ReadInConfig(); err != nil {
 		var missing viper.ConfigFileNotFoundError
@@ -227,7 +235,7 @@ func start(cmd *cobra.Command, modelOverride string) error {
 		}
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
-	return repl(cmd, signals, app, cwd)
+	return repl(cmd, signals, app, cwd, viper.GetBool("clear-scrollback"))
 }
 
 func explicitModel(cmd *cobra.Command) string {

@@ -113,6 +113,7 @@ With no model selected, a terminal opens the model picker. Anything else exits a
 | `--model` | `CO_MODEL` | `provider/model-id` for this process. |
 | `--resume` | `CO_RESUME` | A session id, or `latest` for the newest session in this directory. |
 | `--no-history` | `CO_NO_HISTORY` | Do not write the transcript. |
+| `--clear-scrollback` | `CO_CLEAR_SCROLLBACK` | Erase the terminal scrollback before the TUI starts. Off unless set. |
 
 `CO_` is the environment prefix, and `-` in a flag name becomes `_`.
 
@@ -126,7 +127,7 @@ With no model selected, a terminal opens the model picker. Anything else exits a
 | `/connect provider` | Save an API key for that provider. |
 | `exit`, `quit` | Leave. When a transcript was written, `co` prints the id to resume. |
 
-In the TUI, Tab completes `/models` and `/connect`. Enter sends, Ctrl+J inserts a newline, PgUp and PgDn scroll, and Ctrl+C quits. Ctrl+C during a turn stops that turn.
+In the TUI, Tab completes `/models` and `/connect`. Enter sends, Ctrl+J inserts a newline, and Ctrl+C quits. The transcript fills the terminal. The mouse wheel, trackpad, PgUp, and PgDn scroll it, and it stays pinned to the bottom until you scroll up. Ctrl+C during a turn stops that turn.
 
 When stdin or stdout is not a terminal, the prompt is `> ` on stderr. The answer is written to stdout. Reasoning and tool lines go to stderr.
 

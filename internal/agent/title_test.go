@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kevinjom/co/internal/openai"
 )
@@ -23,6 +24,31 @@ func TestCleanTitleKeepsTheFirstLine(t *testing.T) {
 	}
 	if cleanTitle("   ") != "" {
 		t.Fatal("blank title")
+	}
+}
+
+func TestTitleStartsBeforeTheReply(t *testing.T) {
+	ready := make(chan struct{})
+	chat := &titleChat{
+		title: "Fix the parser.",
+		onTitle: func() {
+			close(ready)
+		},
+		onTurn: func() {
+			select {
+			case <-ready:
+			case <-time.After(2 * time.Second):
+				t.Error("title request did not start")
+			}
+		},
+	}
+	session := NewSession(chat, "test-model", t.TempDir(), &titleStore{})
+	got, err := session.Turn(t.Context(), "please fix the parser", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "ok" {
+		t.Fatalf("answer %q", got)
 	}
 }
 
@@ -91,6 +117,8 @@ type titleChat struct {
 	titleErr error
 	titles   int
 	turns    int
+	onTitle  func()
+	onTurn   func()
 }
 
 func (c *titleChat) ChatStream(
@@ -101,15 +129,27 @@ func (c *titleChat) ChatStream(
 	onChunk func(openai.StreamKind, string),
 ) (openai.Message, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(messages) > 0 && strings.Contains(messages[0].Content, "Reply with a short title") {
+	titleReq := len(messages) > 0 && strings.Contains(messages[0].Content, "Reply with a short title")
+	if titleReq {
 		c.titles++
-		if c.titleErr != nil {
-			return openai.Message{}, c.titleErr
+		err := c.titleErr
+		title := c.title
+		hold := c.onTitle
+		c.mu.Unlock()
+		if hold != nil {
+			hold()
 		}
-		return openai.Message{Role: "assistant", Content: c.title}, nil
+		if err != nil {
+			return openai.Message{}, err
+		}
+		return openai.Message{Role: "assistant", Content: title}, nil
 	}
 	c.turns++
+	hold := c.onTurn
+	c.mu.Unlock()
+	if hold != nil {
+		hold()
+	}
 	if onChunk != nil {
 		onChunk(openai.StreamContent, "ok")
 	}

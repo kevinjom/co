@@ -78,7 +78,7 @@ func (s *Session) setTitle(title string) {
 }
 
 // storeFallbackTitle writes the first line of the prompt, at most ten words.
-// The model name replaces it after the turn. A naming failure leaves this one.
+// The model name replaces it when the background request returns. A naming failure leaves this one.
 func (s *Session) storeFallbackTitle(userText string) {
 	title := transcript.FallbackTitle(userText)
 	if title == "" {
@@ -94,8 +94,8 @@ func (s *Session) storeFallbackTitle(userText string) {
 	}
 }
 
-// refineTitle asks the model for a short name after the reply is finished.
-// Running it during the reply loses the race on a busy local model.
+// refineTitle asks the model for a short name from the first prompt.
+// The request runs beside the reply and uses only that prompt.
 func (s *Session) refineTitle(userText string) {
 	namer, ok := s.recorder.(titler)
 	if !ok || strings.TrimSpace(userText) == "" {

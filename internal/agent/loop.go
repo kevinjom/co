@@ -103,12 +103,9 @@ func (s *Session) Turn(ctx context.Context, userText string, observe Observer) (
 	s.remember(openai.Message{Role: "user", Content: userText}, false)
 	if first {
 		s.storeFallbackTitle(userText)
-	}
-	answer, err := s.converse(ctx, observe)
-	if first && err == nil {
 		s.refineTitle(userText)
 	}
-	return answer, err
+	return s.converse(ctx, observe)
 }
 
 func (s *Session) converse(ctx context.Context, observe Observer) (string, error) {

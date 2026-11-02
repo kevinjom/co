@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"co/internal/openai"
+	"github.com/kevinjom/co/internal/openai"
 )
 
 func TestRecordShape(t *testing.T) {

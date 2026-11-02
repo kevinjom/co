@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"co/internal/openai"
+	"github.com/kevinjom/co/internal/openai"
 )
 
 func writeSSE(w http.ResponseWriter, chunks ...string) {

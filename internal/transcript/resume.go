@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"co/internal/openai"
+	"github.com/kevinjom/co/internal/openai"
 )
 
 // InputError is a session id or transcript the user must correct.

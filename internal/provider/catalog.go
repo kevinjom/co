@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"co/internal/openai"
+	"github.com/kevinjom/co/internal/openai"
 )
 
 // Endpoint is everything a chat call needs for one selection.

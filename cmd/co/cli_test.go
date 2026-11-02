@@ -16,7 +16,7 @@ import (
 	"sync"
 	"testing"
 
-	"co/internal/provider"
+	"github.com/kevinjom/co/internal/provider"
 
 	"github.com/spf13/viper"
 )

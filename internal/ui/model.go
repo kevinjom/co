@@ -15,8 +15,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"co/internal/agent"
-	"co/internal/command"
+	"github.com/kevinjom/co/internal/agent"
+	"github.com/kevinjom/co/internal/command"
 )
 
 const (

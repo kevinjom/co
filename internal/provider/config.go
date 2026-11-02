@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"co/internal/openai"
+	"github.com/kevinjom/co/internal/openai"
 	"gopkg.in/yaml.v3"
 )
 

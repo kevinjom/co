@@ -1,4 +1,4 @@
-module co
+module github.com/kevinjom/co
 
 go 1.26.0
 

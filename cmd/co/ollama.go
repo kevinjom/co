@@ -19,8 +19,8 @@ import (
 	"syscall"
 	"time"
 
-	"co/internal/openai"
-	"co/internal/provider"
+	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/provider"
 
 	"github.com/spf13/cobra"
 )

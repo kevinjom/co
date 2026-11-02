@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"co/internal/openai"
+	"github.com/kevinjom/co/internal/openai"
 )
 
 func TestParse(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"co/internal/openai"
-	"co/internal/tools"
+	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/tools"
 )
 
 // Recorder stores completed messages. A nil recorder leaves history off.

@@ -3,7 +3,7 @@ package ui
 import (
 	"context"
 
-	"co/internal/agent"
+	"github.com/kevinjom/co/internal/agent"
 )
 
 // Director is the session and catalog the TUI drives.

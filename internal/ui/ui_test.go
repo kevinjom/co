@@ -10,8 +10,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"co/internal/agent"
-	"co/internal/openai"
+	"github.com/kevinjom/co/internal/agent"
+	"github.com/kevinjom/co/internal/openai"
 )
 
 func newTestModel(t *testing.T) *model {

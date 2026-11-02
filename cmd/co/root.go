@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"co/internal/command"
-	"co/internal/provider"
-	"co/internal/transcript"
+	"github.com/kevinjom/co/internal/command"
+	"github.com/kevinjom/co/internal/provider"
+	"github.com/kevinjom/co/internal/transcript"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

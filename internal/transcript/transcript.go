@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"co/internal/openai"
+	"github.com/kevinjom/co/internal/openai"
 )
 
 const version = 1

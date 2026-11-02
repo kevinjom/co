@@ -9,9 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"co/internal/agent"
-	"co/internal/command"
-	"co/internal/ui"
+	"github.com/kevinjom/co/internal/agent"
+	"github.com/kevinjom/co/internal/command"
+	"github.com/kevinjom/co/internal/ui"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"

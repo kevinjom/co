@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"co/internal/openai"
+	"github.com/kevinjom/co/internal/openai"
 	"gopkg.in/yaml.v3"
 )
 

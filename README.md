@@ -9,6 +9,12 @@ A terminal on both stdin and stdout gets a Bubble Tea TUI. A pipe or a redirect 
 Go 1.26 or newer.
 
 ```sh
+go install github.com/kevinjom/co/cmd/co@latest
+```
+
+To build from a checkout:
+
+```sh
 git clone https://github.com/kevinjom/co.git
 cd co
 go build -o co ./cmd/co

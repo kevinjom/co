@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"strings"
 
-	"co/internal/agent"
-	"co/internal/openai"
-	"co/internal/provider"
-	"co/internal/transcript"
+	"github.com/kevinjom/co/internal/agent"
+	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/provider"
+	"github.com/kevinjom/co/internal/transcript"
 )
 
 // App is the session, catalog, and history shared by both fronts.

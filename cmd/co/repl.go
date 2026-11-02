@@ -119,6 +119,9 @@ func runLineCommand(cmd *cobra.Command, signals *signalSession, app *command.App
 	case command.KindError:
 		fmt.Fprintln(stderr, parsed.Err)
 		return true, nil
+	case command.KindNew, command.KindSessions:
+		fmt.Fprintln(stderr, "available in the TUI")
+		return true, nil
 	case command.KindModels:
 		if parsed.Arg == "" {
 			ids, err := app.Models(signals.ctx)
@@ -130,7 +133,7 @@ func runLineCommand(cmd *cobra.Command, signals *signalSession, app *command.App
 			}
 			return true, nil
 		}
-		if err := app.Select(signals.ctx, parsed.Arg); err != nil {
+		if err := app.Select(signals.ctx, parsed.Arg, app.Session()); err != nil {
 			if signals.ctx.Err() != nil {
 				return true, signals.err()
 			}

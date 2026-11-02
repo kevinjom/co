@@ -106,8 +106,8 @@ func (m *model) headerLine() string {
 func (m *model) statusLine() string {
 	var left string
 	switch {
-	case m.busy:
-		label := m.status
+	case m.tab().busy:
+		label := m.tab().activity
 		if label == "" {
 			label = "thinking"
 		}
@@ -121,6 +121,8 @@ func (m *model) statusLine() string {
 		left = m.spin.View() + style.Render(label)
 	case m.mode == modeModels:
 		left = m.theme.dim.Render("choose a model")
+	case m.mode == modeSessions:
+		left = m.theme.dim.Render("choose a session")
 	case m.mode == modeProviders:
 		left = m.theme.dim.Render("choose a provider")
 	case m.mode == modeConnect:
@@ -137,11 +139,11 @@ func (m *model) statusLine() string {
 func (m *model) helpLine() string {
 	text := "enter send  ·  ctrl+j newline  ·  wheel/pgup/pgdn scroll  ·  ctrl+c quit"
 	switch {
-	case m.busy:
+	case m.tab().busy:
 		text = "ctrl+c stop  ·  wheel/pgup/pgdn scroll"
-	case (m.mode == modeModels || m.mode == modeProviders) && m.session == nil:
+	case (m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions) && m.session() == nil:
 		text = "enter select  ·  esc quit  ·  up/down move"
-	case m.mode == modeModels || m.mode == modeProviders:
+	case m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions:
 		text = "enter select  ·  esc close  ·  up/down move"
 	case m.mode == modeConnect:
 		text = "enter save  ·  esc cancel"
@@ -155,13 +157,101 @@ func (m *model) helpLine() string {
 	return m.theme.dim.Render(text)
 }
 
+const (
+	panelWidth       = 24
+	panelMinTerminal = 60
+)
+
+func (m *model) showPanel() bool {
+	return m.usableWidth() >= panelMinTerminal && m.sessionCount() > 0
+}
+
 func (m *model) transcriptView() string {
 	body := m.viewport.View()
 	bar := m.scrollBar()
-	if bar == "" {
+	if bar != "" {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, body, bar)
+	}
+	if !m.showPanel() {
 		return body
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, body, bar)
+	return lipgloss.JoinHorizontal(lipgloss.Top, body, m.sessionPanel())
+}
+
+func (m *model) sessionPanel() string {
+	height := m.viewport.Height()
+	if height < 1 {
+		height = 1
+	}
+	inner := panelWidth - 1
+	rows := make([]string, 0, height)
+	rows = append(rows, m.panelLine(m.theme.dim, " sessions", inner))
+	indexes := m.panelIndexes(height - 1)
+	for _, index := range indexes {
+		item := m.tabs[index]
+		mark := statusMark(item.state)
+		if item.state == statusWorking {
+			mark = m.spin.View()
+		}
+		rest := " " + item.state.label() + " " + item.title
+		room := inner - lipgloss.Width(mark)
+		if room < 1 {
+			room = 1
+		}
+		style := m.theme.dim
+		if index == m.focus {
+			style = m.theme.accent
+		}
+		text := ansi.Truncate(rest, room, "…")
+		gap := room - lipgloss.Width(text)
+		if gap > 0 {
+			text += strings.Repeat(" ", gap)
+		}
+		rows = append(rows, m.theme.dim.Render("│")+mark+style.Render(text))
+	}
+	for len(rows) < height {
+		rows = append(rows, m.panelLine(m.theme.dim, "", inner))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func (m *model) panelIndexes(height int) []int {
+	indexes := []int{}
+	for i := range m.tabs {
+		if m.tabs[i].session != nil {
+			indexes = append(indexes, i)
+		}
+	}
+	if height < 1 {
+		return nil
+	}
+	if len(indexes) <= height {
+		return indexes
+	}
+	pos := 0
+	for i, index := range indexes {
+		if index == m.focus {
+			pos = i
+			break
+		}
+	}
+	start := pos - height/2
+	if start < 0 {
+		start = 0
+	}
+	if start+height > len(indexes) {
+		start = len(indexes) - height
+	}
+	return indexes[start : start+height]
+}
+
+func (m *model) panelLine(style lipgloss.Style, text string, inner int) string {
+	text = ansi.Truncate(text, inner, "…")
+	gap := inner - lipgloss.Width(text)
+	if gap > 0 {
+		text += strings.Repeat(" ", gap)
+	}
+	return m.theme.dim.Render("│") + style.Render(text)
 }
 
 func (m *model) scrollBar() string {
@@ -191,11 +281,12 @@ func (m *model) scrollBar() string {
 
 func (m *model) renderTranscript() string {
 	width := m.contentWidth()
-	if len(m.blocks) == 0 {
+	blocks := m.tab().blocks
+	if len(blocks) == 0 {
 		return renderWelcome(width, m.theme)
 	}
-	parts := make([]string, len(m.blocks))
-	for i, block := range m.blocks {
+	parts := make([]string, len(blocks))
+	for i, block := range blocks {
 		parts[i] = m.renderBlock(block, width)
 	}
 	return strings.Join(parts, "\n\n") + "\n"

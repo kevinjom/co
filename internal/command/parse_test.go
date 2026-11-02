@@ -19,6 +19,10 @@ func TestParse(t *testing.T) {
 		{line: "/connect openrouter", kind: KindConnect, arg: "openrouter"},
 		{line: "/connect", kind: KindConnect},
 		{line: "/connect open router", kind: KindError},
+		{line: "/new", kind: KindNew},
+		{line: "/new extra", kind: KindError},
+		{line: "/sessions", kind: KindSessions},
+		{line: "/sessions 2", kind: KindError},
 		{line: "/nope", kind: KindError},
 	}
 	for _, tc := range cases {
@@ -53,9 +57,12 @@ func TestComplete(t *testing.T) {
 	}{
 		{stem: "/m", value: "/models", names: []string{"/models"}},
 		{stem: "/c", value: "/connect", names: []string{"/connect"}},
-		{stem: "/", value: "/models", names: []string{"/models", "/connect"}},
-		{stem: "/", index: 1, value: "/connect", names: []string{"/models", "/connect"}},
-		{stem: "/", index: 2, value: "/models", names: []string{"/models", "/connect"}},
+		{stem: "/n", value: "/new", names: []string{"/new"}},
+		{stem: "/s", value: "/sessions", names: []string{"/sessions"}},
+		{stem: "/", value: "/models", names: []string{"/models", "/connect", "/new", "/sessions"}},
+		{stem: "/", index: 1, value: "/connect", names: []string{"/models", "/connect", "/new", "/sessions"}},
+		{stem: "/", index: 2, value: "/new", names: []string{"/models", "/connect", "/new", "/sessions"}},
+		{stem: "/", index: 4, value: "/models", names: []string{"/models", "/connect", "/new", "/sessions"}},
 		{stem: "/models", names: []string{"/models"}},
 		{stem: "/connect", names: []string{"/connect"}},
 		{stem: "/nope"},

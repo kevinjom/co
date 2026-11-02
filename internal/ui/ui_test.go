@@ -88,8 +88,8 @@ func TestSubmitShowsUserAndStaysBusy(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected a command")
 	}
-	if !m.busy || m.status != "thinking" {
-		t.Fatalf("busy=%v status=%q", m.busy, m.status)
+	if !m.tab().busy || m.tab().activity != "thinking" {
+		t.Fatalf("busy=%v status=%q", m.tab().busy, m.tab().activity)
 	}
 	plain := ansi.Strip(m.renderTranscript())
 	if !strings.Contains(plain, "❯ how many lines?") {
@@ -100,8 +100,8 @@ func TestSubmitShowsUserAndStaysBusy(t *testing.T) {
 func TestEmptyEnterDoesNothing(t *testing.T) {
 	m := newTestModel(t)
 	_, cmd := m.Update(press(tea.KeyEnter, 0))
-	if cmd != nil || m.busy || len(m.blocks) != 0 {
-		t.Fatalf("busy=%v blocks=%d cmd=%v", m.busy, len(m.blocks), cmd != nil)
+	if cmd != nil || m.tab().busy || len(m.tab().blocks) != 0 {
+		t.Fatalf("busy=%v blocks=%d cmd=%v", m.tab().busy, len(m.tab().blocks), cmd != nil)
 	}
 }
 
@@ -128,8 +128,8 @@ func TestCtrlCQuitsWhenIdle(t *testing.T) {
 func TestCtrlCCancelsBusyTurn(t *testing.T) {
 	m := newTestModel(t)
 	canceled := false
-	m.busy = true
-	m.cancel = func() { canceled = true }
+	m.tab().busy = true
+	m.tab().cancel = func() { canceled = true }
 	_, cmd := m.Update(press('c', tea.ModCtrl))
 	if !canceled || m.quitting || cmd != nil {
 		t.Fatalf("canceled=%v quitting=%v", canceled, m.quitting)
@@ -138,17 +138,17 @@ func TestCtrlCCancelsBusyTurn(t *testing.T) {
 
 func TestTurnMessagesAppendInOrder(t *testing.T) {
 	m := newTestModel(t)
-	m.turnID = 1
-	m.busy = true
-	m.events = make(chan tea.Msg)
-	_, cmd := m.Update(eventMsg{id: 1, event: agent.ToolStart{ID: "call_1", Name: "list_dir", Detail: "path=."}})
+	m.tab().turnID = 1
+	m.tab().busy = true
+	m.tab().events = make(chan tea.Msg)
+	_, cmd := m.Update(eventMsg{tabID: 1, id: 1, event: agent.ToolStart{ID: "call_1", Name: "list_dir", Detail: "path=."}})
 	if cmd == nil {
 		t.Fatal("expected to keep listening")
 	}
-	updated, _ := m.Update(eventMsg{id: 1, event: agent.AnswerDelta{Text: "two files"}})
-	updated, _ = updated.(*model).Update(turnDoneMsg{id: 1, answer: "two files"})
+	updated, _ := m.Update(eventMsg{tabID: 1, id: 1, event: agent.AnswerDelta{Text: "two files"}})
+	updated, _ = updated.(*model).Update(turnDoneMsg{tabID: 1, id: 1, answer: "two files"})
 	got := updated.(*model)
-	if got.busy {
+	if got.tab().busy {
 		t.Fatal("still busy")
 	}
 	plain := ansi.Strip(got.renderTranscript())
@@ -161,17 +161,17 @@ func TestTurnMessagesAppendInOrder(t *testing.T) {
 
 func TestReasoningStreamsBeforeTheAnswer(t *testing.T) {
 	m := newTestModel(t)
-	m.turnID = 1
-	m.busy = true
-	m.events = make(chan tea.Msg)
-	m.Update(eventMsg{id: 1, event: agent.ReasoningDelta{Text: "Think"}})
-	m.Update(eventMsg{id: 1, event: agent.ReasoningDelta{Text: "ing"}})
-	m.Update(eventMsg{id: 1, event: agent.AnswerDelta{Text: "Hi"}})
-	if len(m.blocks) != 2 || m.blocks[0].kind != blockReasoning || m.blocks[0].text != "Thinking" {
-		t.Fatalf("reasoning %+v", m.blocks)
+	m.tab().turnID = 1
+	m.tab().busy = true
+	m.tab().events = make(chan tea.Msg)
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ReasoningDelta{Text: "Think"}})
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ReasoningDelta{Text: "ing"}})
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.AnswerDelta{Text: "Hi"}})
+	if len(m.tab().blocks) != 2 || m.tab().blocks[0].kind != blockReasoning || m.tab().blocks[0].text != "Thinking" {
+		t.Fatalf("reasoning %+v", m.tab().blocks)
 	}
-	if m.blocks[1].kind != blockAssistant || m.blocks[1].text != "Hi" {
-		t.Fatalf("answer %+v", m.blocks[1])
+	if m.tab().blocks[1].kind != blockAssistant || m.tab().blocks[1].text != "Hi" {
+		t.Fatalf("answer %+v", m.tab().blocks[1])
 	}
 	plain := ansi.Strip(m.renderTranscript())
 	if !strings.Contains(plain, "Thinking") || !strings.Contains(plain, "Hi") {
@@ -181,41 +181,41 @@ func TestReasoningStreamsBeforeTheAnswer(t *testing.T) {
 
 func TestReasoningOnlyAnswerIsNotDuplicated(t *testing.T) {
 	m := newTestModel(t)
-	m.turnID = 1
-	m.busy = true
-	m.events = make(chan tea.Msg)
-	m.Update(eventMsg{id: 1, event: agent.ReasoningDelta{Text: "the answer"}})
-	updated, _ := m.Update(turnDoneMsg{id: 1, answer: "the answer"})
+	m.tab().turnID = 1
+	m.tab().busy = true
+	m.tab().events = make(chan tea.Msg)
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ReasoningDelta{Text: "the answer"}})
+	updated, _ := m.Update(turnDoneMsg{tabID: 1, id: 1, answer: "the answer"})
 	got := updated.(*model)
-	if len(got.blocks) != 1 || got.blocks[0].kind != blockReasoning || got.blocks[0].text != "the answer" {
-		t.Fatalf("blocks %+v", got.blocks)
+	if len(got.tab().blocks) != 1 || got.tab().blocks[0].kind != blockReasoning || got.tab().blocks[0].text != "the answer" {
+		t.Fatalf("blocks %+v", got.tab().blocks)
 	}
 }
 
 func TestAnswerDeltasGrowOneBlock(t *testing.T) {
 	m := newTestModel(t)
-	m.turnID = 1
-	m.busy = true
-	m.events = make(chan tea.Msg)
-	m.Update(eventMsg{id: 1, event: agent.AnswerDelta{Text: "hel"}})
-	m.Update(eventMsg{id: 1, event: agent.AnswerDelta{Text: "lo"}})
-	if len(m.blocks) != 1 || m.blocks[0].kind != blockAssistant || m.blocks[0].text != "hello" {
-		t.Fatalf("blocks %+v", m.blocks)
+	m.tab().turnID = 1
+	m.tab().busy = true
+	m.tab().events = make(chan tea.Msg)
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.AnswerDelta{Text: "hel"}})
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.AnswerDelta{Text: "lo"}})
+	if len(m.tab().blocks) != 1 || m.tab().blocks[0].kind != blockAssistant || m.tab().blocks[0].text != "hello" {
+		t.Fatalf("blocks %+v", m.tab().blocks)
 	}
-	if m.status != "answering" {
-		t.Fatalf("status %q", m.status)
+	if m.tab().activity != "answering" {
+		t.Fatalf("status %q", m.tab().activity)
 	}
 }
 
 func TestToolErrorMarksTheLine(t *testing.T) {
 	m := newTestModel(t)
-	m.turnID = 1
-	m.busy = true
-	m.events = make(chan tea.Msg)
-	m.Update(eventMsg{id: 1, event: agent.ToolStart{ID: "call_1", Name: "read_file", Detail: "path=missing"}})
-	m.Update(eventMsg{id: 1, event: agent.ToolDone{ID: "call_1", Err: errors.New("missing")}})
-	if len(m.blocks) != 1 || !m.blocks[0].failed || !m.blocks[0].done {
-		t.Fatalf("blocks %+v", m.blocks)
+	m.tab().turnID = 1
+	m.tab().busy = true
+	m.tab().events = make(chan tea.Msg)
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ToolStart{ID: "call_1", Name: "read_file", Detail: "path=missing"}})
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ToolDone{ID: "call_1", Err: errors.New("missing")}})
+	if len(m.tab().blocks) != 1 || !m.tab().blocks[0].failed || !m.tab().blocks[0].done {
+		t.Fatalf("blocks %+v", m.tab().blocks)
 	}
 	plain := ansi.Strip(m.renderTranscript())
 	if !strings.Contains(plain, "Read") || !strings.Contains(plain, "path=missing") {
@@ -225,46 +225,46 @@ func TestToolErrorMarksTheLine(t *testing.T) {
 
 func TestCtrlCKeepsPartialAnswer(t *testing.T) {
 	m := newTestModel(t)
-	m.turnID = 1
-	m.busy = true
-	m.events = make(chan tea.Msg)
+	m.tab().turnID = 1
+	m.tab().busy = true
+	m.tab().events = make(chan tea.Msg)
 	canceled := false
-	m.cancel = func() { canceled = true }
-	m.Update(eventMsg{id: 1, event: agent.AnswerDelta{Text: "partial answer"}})
+	m.tab().cancel = func() { canceled = true }
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.AnswerDelta{Text: "partial answer"}})
 	_, cmd := m.Update(press('c', tea.ModCtrl))
 	if !canceled || m.quitting || cmd != nil {
 		t.Fatalf("canceled=%v quitting=%v cmd=%v", canceled, m.quitting, cmd != nil)
 	}
-	updated, cmd := m.Update(turnDoneMsg{id: 1, answer: "partial answer", err: context.Canceled})
+	updated, cmd := m.Update(turnDoneMsg{tabID: 1, id: 1, answer: "partial answer", err: context.Canceled})
 	got := updated.(*model)
 	plain := ansi.Strip(got.renderTranscript())
 	if !strings.Contains(plain, "partial answer") || !strings.Contains(plain, "interrupted") {
 		t.Fatalf("transcript %q", plain)
 	}
-	if got.busy || cmd == nil {
+	if got.tab().busy || cmd == nil {
 		t.Fatal("expected the turn to finish")
 	}
 }
 
 func TestStaleTurnIsIgnored(t *testing.T) {
 	m := newTestModel(t)
-	m.turnID = 2
-	m.busy = true
-	updated, _ := m.Update(turnDoneMsg{id: 1, answer: "stale"})
+	m.tab().turnID = 2
+	m.tab().busy = true
+	updated, _ := m.Update(turnDoneMsg{tabID: 1, id: 1, answer: "stale"})
 	got := updated.(*model)
-	if !got.busy || len(got.blocks) != 0 {
-		t.Fatalf("busy=%v blocks=%d", got.busy, len(got.blocks))
+	if !got.tab().busy || len(got.tab().blocks) != 0 {
+		t.Fatalf("busy=%v blocks=%d", got.tab().busy, len(got.tab().blocks))
 	}
 }
 
 func TestCanceledTurnNotesInterruption(t *testing.T) {
 	m := newTestModel(t)
-	m.turnID = 1
-	m.busy = true
-	updated, cmd := m.Update(turnDoneMsg{id: 1, err: context.Canceled})
+	m.tab().turnID = 1
+	m.tab().busy = true
+	updated, cmd := m.Update(turnDoneMsg{tabID: 1, id: 1, err: context.Canceled})
 	got := updated.(*model)
-	if got.busy || got.quitting || cmd == nil {
-		t.Fatalf("busy=%v quitting=%v", got.busy, got.quitting)
+	if got.tab().busy || got.quitting || cmd == nil {
+		t.Fatalf("busy=%v quitting=%v", got.tab().busy, got.quitting)
 	}
 	if !strings.Contains(ansi.Strip(got.renderTranscript()), "interrupted") {
 		t.Fatalf("transcript %q", ansi.Strip(got.renderTranscript()))
@@ -276,9 +276,9 @@ func TestParentCancelQuits(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	m.ctx = ctx
-	m.turnID = 1
-	m.busy = true
-	_, cmd := m.Update(turnDoneMsg{id: 1, err: context.Canceled})
+	m.tab().turnID = 1
+	m.tab().busy = true
+	_, cmd := m.Update(turnDoneMsg{tabID: 1, id: 1, err: context.Canceled})
 	if !m.quitting || cmd == nil || m.exitErr == nil {
 		t.Fatal("expected quit on parent cancel")
 	}
@@ -297,7 +297,7 @@ func TestShortPathUsesHome(t *testing.T) {
 
 func TestAssistantMarkdownRenders(t *testing.T) {
 	m := newTestModel(t)
-	m.blocks = []block{{
+	m.tab().blocks = []block{{
 		kind: blockAssistant,
 		text: "# Title\n\nRun `go test` and **bold**.\n\n```go\nfunc main() {}\n```",
 	}}
@@ -323,7 +323,7 @@ func TestAssistantMarkdownRenders(t *testing.T) {
 
 func TestTranscriptKindsStayDistinct(t *testing.T) {
 	m := newTestModel(t)
-	m.blocks = []block{
+	m.tab().blocks = []block{
 		{kind: blockUser, text: "how many lines?"},
 		{kind: blockReasoning, text: "Count the files."},
 		{kind: blockTool, tool: "list_dir", detail: "path=."},
@@ -358,13 +358,34 @@ type fakeDirector struct {
 	providers []string
 	picked    string
 	session   *agent.Session
+	selected  *agent.Session
+	opened    []*agent.Session
+	cwd       string
 	ready     bool
+	openErr   error
 }
 
 func (f *fakeDirector) Models(context.Context) ([]string, error) { return f.models, nil }
-func (f *fakeDirector) Select(_ context.Context, ref string) error {
+func (f *fakeDirector) Select(_ context.Context, ref string, session *agent.Session) error {
 	f.picked = ref
+	f.selected = session
 	return nil
+}
+func (f *fakeDirector) Open(context.Context) (*agent.Session, error) {
+	if f.openErr != nil {
+		return nil, f.openErr
+	}
+	dir := f.cwd
+	if dir == "" {
+		dir = "."
+	}
+	modelName := f.picked
+	if modelName == "" {
+		modelName = "test-model"
+	}
+	session := agent.NewSession(openai.New("http://127.0.0.1:1"), modelName, dir, nil)
+	f.opened = append(f.opened, session)
+	return session, nil
 }
 func (f *fakeDirector) Providers() []string          { return f.providers }
 func (f *fakeDirector) CanConnect(string) error      { return nil }
@@ -378,15 +399,15 @@ func TestModelsCommandDoesNotStartATurn(t *testing.T) {
 	m := newTestModel(t)
 	director := &fakeDirector{
 		models:  []string{"ollama/a", "ollama/b"},
-		session: m.session,
+		session: m.tab().session,
 		ready:   true,
 	}
 	m.director = director
 	m.input.SetValue("/models")
 	updated, cmd := m.Update(press(tea.KeyEnter, 0))
 	got := updated.(*model)
-	if got.busy || got.mode != modeModels || cmd == nil {
-		t.Fatalf("busy=%v mode=%d cmd=%v", got.busy, got.mode, cmd != nil)
+	if got.tab().busy || got.mode != modeModels || cmd == nil {
+		t.Fatalf("busy=%v mode=%d cmd=%v", got.tab().busy, got.mode, cmd != nil)
 	}
 	loaded := cmd().(modelsLoadedMsg)
 	updated, _ = got.Update(loaded)
@@ -398,8 +419,8 @@ func TestModelsCommandDoesNotStartATurn(t *testing.T) {
 
 	updated, cmd = got.Update(press(tea.KeyEnter, 0))
 	got = updated.(*model)
-	if cmd == nil || got.busy {
-		t.Fatalf("busy=%v cmd=%v", got.busy, cmd != nil)
+	if cmd == nil || got.tab().busy {
+		t.Fatalf("busy=%v cmd=%v", got.tab().busy, cmd != nil)
 	}
 	done := cmd().(selectDoneMsg)
 	updated, _ = got.Update(done)
@@ -407,7 +428,7 @@ func TestModelsCommandDoesNotStartATurn(t *testing.T) {
 	if director.picked != "ollama/a" || got.mode != modeChat || got.modelName != "ollama/a" {
 		t.Fatalf("picked %q mode %d name %q", director.picked, got.mode, got.modelName)
 	}
-	if got.busy || strings.Contains(ansi.Strip(got.renderTranscript()), "❯ /models") {
+	if got.tab().busy || strings.Contains(ansi.Strip(got.renderTranscript()), "❯ /models") {
 		t.Fatal("command was sent as a chat turn")
 	}
 }
@@ -416,15 +437,15 @@ func TestConnectOpensProviderPicker(t *testing.T) {
 	m := newTestModel(t)
 	director := &fakeDirector{
 		providers: []string{"gemini", "openrouter"},
-		session:   m.session,
+		session:   m.tab().session,
 		ready:     true,
 	}
 	m.director = director
 	m.input.SetValue("/connect")
 	updated, cmd := m.Update(press(tea.KeyEnter, 0))
 	got := updated.(*model)
-	if got.busy || got.mode != modeProviders || cmd != nil {
-		t.Fatalf("busy=%v mode=%d cmd=%v", got.busy, got.mode, cmd != nil)
+	if got.tab().busy || got.mode != modeProviders || cmd != nil {
+		t.Fatalf("busy=%v mode=%d cmd=%v", got.tab().busy, got.mode, cmd != nil)
 	}
 	plain := ansi.Strip(got.View().Content)
 	if !strings.Contains(plain, "gemini") || !strings.Contains(plain, "openrouter") || !strings.Contains(plain, "choose a provider") {
@@ -459,7 +480,7 @@ func TestConnectWithProviderSkipsPicker(t *testing.T) {
 	m := newTestModel(t)
 	m.director = &fakeDirector{
 		providers: []string{"gemini", "openrouter"},
-		session:   m.session,
+		session:   m.tab().session,
 		ready:     true,
 	}
 	m.input.SetValue("/connect gemini")
@@ -476,7 +497,7 @@ func TestConnectWithProviderSkipsPicker(t *testing.T) {
 
 func TestConnectWithNoProviders(t *testing.T) {
 	m := newTestModel(t)
-	m.director = &fakeDirector{session: m.session, ready: true}
+	m.director = &fakeDirector{session: m.tab().session, ready: true}
 	m.input.SetValue("/connect")
 	updated, _ := m.Update(press(tea.KeyEnter, 0))
 	got := updated.(*model)
@@ -555,8 +576,8 @@ func TestUnknownCommandIsNotATurn(t *testing.T) {
 	m.input.SetValue("/nope")
 	updated, cmd := m.Update(press(tea.KeyEnter, 0))
 	got := updated.(*model)
-	if got.busy || cmd != nil {
-		t.Fatalf("busy=%v cmd=%v", got.busy, cmd != nil)
+	if got.tab().busy || cmd != nil {
+		t.Fatalf("busy=%v cmd=%v", got.tab().busy, cmd != nil)
 	}
 	plain := ansi.Strip(got.renderTranscript())
 	if !strings.Contains(plain, "unknown command") {
@@ -566,7 +587,7 @@ func TestUnknownCommandIsNotATurn(t *testing.T) {
 
 func TestStartupEscQuits(t *testing.T) {
 	m := newTestModel(t)
-	m.session = nil
+	m.tab().session = nil
 	m.mode = modeModels
 	m.startup = true
 	updated, cmd := m.Update(press(tea.KeyEsc, 0))
@@ -578,7 +599,7 @@ func TestStartupEscQuits(t *testing.T) {
 
 func TestPasteFillsConnectKey(t *testing.T) {
 	m := newTestModel(t)
-	m.director = &fakeDirector{session: m.session, ready: true}
+	m.director = &fakeDirector{session: m.tab().session, ready: true}
 	m.mode = modeConnect
 	m.connectID = "gemini"
 	updated, _ := m.Update(tea.PasteMsg{Content: "sk-test-key\n"})
@@ -633,7 +654,7 @@ func TestWheelScrollsALineAtATime(t *testing.T) {
 	for i := range lines {
 		lines[i] = "row"
 	}
-	m.blocks = []block{{kind: blockNote, text: strings.Join(lines, "\n")}}
+	m.tab().blocks = []block{{kind: blockNote, text: strings.Join(lines, "\n")}}
 	m.layout()
 	m.paint()
 	if !m.viewport.AtBottom() || m.viewport.YOffset() == 0 {
@@ -670,7 +691,7 @@ func TestWheelScrollsALineAtATime(t *testing.T) {
 
 func TestWheelMovesThePicker(t *testing.T) {
 	m := newTestModel(t)
-	m.director = &fakeDirector{providers: []string{"gemini", "openrouter"}, session: m.session, ready: true}
+	m.director = &fakeDirector{providers: []string{"gemini", "openrouter"}, session: m.tab().session, ready: true}
 	m.input.SetValue("/connect")
 	updated, _ := m.Update(press(tea.KeyEnter, 0))
 	got := updated.(*model)
@@ -689,5 +710,102 @@ func TestEscClosesPicker(t *testing.T) {
 	got := updated.(*model)
 	if got.quitting || got.mode != modeChat || cmd == nil {
 		t.Fatalf("quitting=%v mode=%d", got.quitting, got.mode)
+	}
+}
+
+func TestNewSessionFocusesIt(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().blocks = []block{{kind: blockUser, text: "first"}}
+	m.director = &fakeDirector{ready: true, cwd: m.cwd, session: m.tab().session}
+	m.input.SetValue("/new")
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if cmd == nil {
+		t.Fatal("expected a new session")
+	}
+	updated, _ = got.Update(cmd().(openedMsg))
+	got = updated.(*model)
+	if len(got.tabs) != 2 || got.focus != 1 || got.tab().session == got.tabs[0].session {
+		t.Fatalf("tabs %d focus %d", len(got.tabs), got.focus)
+	}
+	if got.tabs[0].blocks[0].text != "first" {
+		t.Fatal("lost the first transcript")
+	}
+	plain := ansi.Strip(got.renderTranscript())
+	if strings.Contains(plain, "first") || !strings.Contains(plain, "Ask about this directory") {
+		t.Fatalf("transcript %q", plain)
+	}
+	view := ansi.Strip(got.View().Content)
+	if !strings.Contains(view, "New session") || !strings.Contains(view, "○") {
+		t.Fatalf("panel %q", view)
+	}
+}
+
+func TestBackgroundTurnLeavesTheVisibleTranscript(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().blocks = []block{{kind: blockUser, text: "visible"}}
+	other := agent.NewSession(openai.New("http://127.0.0.1:1"), "test-model", m.cwd, nil)
+	m.tabs = append(m.tabs, newTab(2, other))
+	back := &m.tabs[1]
+	back.busy = true
+	back.state = statusWorking
+	back.turnID = 1
+	back.events = make(chan tea.Msg)
+	before := ansi.Strip(m.renderTranscript())
+	m.Update(eventMsg{tabID: 2, id: 1, event: agent.AnswerDelta{Text: "hidden"}})
+	if ansi.Strip(m.renderTranscript()) != before {
+		t.Fatal("visible transcript changed")
+	}
+	if m.tabs[1].state != statusWorking || len(m.tabs[1].blocks) != 1 || m.tabs[1].blocks[0].text != "hidden" {
+		t.Fatalf("background %+v", m.tabs[1].blocks)
+	}
+	m.input.SetValue("next")
+	_, cmd := m.Update(press(tea.KeyEnter, 0))
+	if cmd == nil || !m.tab().busy || !m.tabs[1].busy {
+		t.Fatalf("focused busy %v background busy %v", m.tab().busy, m.tabs[1].busy)
+	}
+}
+
+func TestSessionsCommandSwitchesTranscript(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().blocks = []block{{kind: blockUser, text: "alpha"}}
+	m.tab().draft = "keep me"
+	other := agent.NewSession(openai.New("http://127.0.0.1:1"), "test-model", m.cwd, nil)
+	m.tabs = append(m.tabs, newTab(2, other))
+	m.tabs[1].blocks = []block{{kind: blockUser, text: "beta"}}
+	m.focus = 1
+	m.paint()
+	m.input.SetValue("/sessions")
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if got.mode != modeSessions || cmd != nil {
+		t.Fatalf("mode %d cmd %v", got.mode, cmd != nil)
+	}
+	updated, _ = got.Update(press(tea.KeyUp, 0))
+	updated, _ = updated.(*model).Update(press(tea.KeyEnter, 0))
+	got = updated.(*model)
+	if got.focus != 0 || got.mode != modeChat {
+		t.Fatalf("focus %d mode %d", got.focus, got.mode)
+	}
+	plain := ansi.Strip(got.renderTranscript())
+	if !strings.Contains(plain, "alpha") || strings.Contains(plain, "beta") {
+		t.Fatalf("transcript %q", plain)
+	}
+	if got.input.Value() != "keep me" {
+		t.Fatalf("draft %q", got.input.Value())
+	}
+	if got.tabs[1].busy {
+		t.Fatal("switching canceled the other session")
+	}
+}
+
+func TestNarrowTerminalHidesTheSessionPanel(t *testing.T) {
+	m := newTestModel(t)
+	m.width = 40
+	m.layout()
+	m.paint()
+	plain := ansi.Strip(m.View().Content)
+	if strings.Contains(plain, "New session") {
+		t.Fatalf("panel shown: %q", plain)
 	}
 }

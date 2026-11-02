@@ -14,6 +14,8 @@ const (
 	KindQuit
 	KindModels
 	KindConnect
+	KindNew
+	KindSessions
 	KindError
 )
 
@@ -25,17 +27,20 @@ type Parsed struct {
 }
 
 const (
-	cmdModels  = "/models"
-	cmdConnect = "/connect"
+	cmdModels   = "/models"
+	cmdConnect  = "/connect"
+	cmdNew      = "/new"
+	cmdSessions = "/sessions"
 )
 
 func slashCommands() []string {
-	return []string{cmdModels, cmdConnect}
+	return []string{cmdModels, cmdConnect, cmdNew, cmdSessions}
 }
 
 // Parse classifies a line before it can become a chat turn.
 // /models and /models <provider>/<model-id> select a model.
 // /connect lists providers that accept a key. /connect <provider> skips that list.
+// /new starts another session. /sessions lists the open ones.
 // exit and quit leave the session.
 func Parse(line string) Parsed {
 	line = strings.TrimSpace(line)
@@ -57,6 +62,16 @@ func Parse(line string) Parsed {
 			return Parsed{Kind: KindError, Err: errors.New("usage: /connect [provider]")}
 		}
 		return Parsed{Kind: KindConnect, Arg: arg}
+	case cmdNew:
+		if arg != "" {
+			return Parsed{Kind: KindError, Err: errors.New("usage: /new")}
+		}
+		return Parsed{Kind: KindNew}
+	case cmdSessions:
+		if arg != "" {
+			return Parsed{Kind: KindError, Err: errors.New("usage: /sessions")}
+		}
+		return Parsed{Kind: KindSessions}
 	default:
 		return Parsed{Kind: KindError, Err: fmt.Errorf("unknown command %q", name)}
 	}

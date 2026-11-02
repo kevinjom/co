@@ -49,6 +49,7 @@ type block struct {
 }
 
 type eventMsg struct {
+	tabID int
 	id    int
 	event agent.Event
 }
@@ -56,9 +57,15 @@ type eventMsg struct {
 type paintMsg struct{}
 
 type turnDoneMsg struct {
+	tabID  int
 	id     int
 	answer string
 	err    error
+}
+
+type openedMsg struct {
+	session *agent.Session
+	err     error
 }
 
 type inputMode int
@@ -68,13 +75,17 @@ const (
 	modeModels
 	modeProviders
 	modeConnect
+	modeSessions
 )
 
 // model is the interactive session. The program takes the whole terminal.
 // The transcript scrolls inside that frame, a line at a time, and stays
 // pinned to the bottom until the user scrolls up.
 type model struct {
-	session   *agent.Session
+	tabs    []tab
+	focus   int
+	nextTab int
+
 	director  Director
 	ctx       context.Context
 	modelName string
@@ -102,19 +113,9 @@ type model struct {
 	width  int
 	height int
 
-	blocks []block
-	busy   bool
-	status string
-	turnID int
-	cancel context.CancelFunc
-	events <-chan tea.Msg
-
-	dirty         bool
-	paintWaiting  bool
-	lastPaint     time.Time
-	answered      bool
-	answerOpen    bool
-	reasoningOpen bool
+	dirty        bool
+	paintWaiting bool
+	lastPaint    time.Time
 
 	quitting      bool
 	explainResume bool
@@ -127,7 +128,8 @@ func newModel(ctx context.Context, session *agent.Session, modelName, cwd string
 	}
 	th := newTheme(true)
 	m := &model{
-		session:   session,
+		tabs:      []tab{newTab(1, session)},
+		nextTab:   2,
 		ctx:       ctx,
 		modelName: modelName,
 		cwd:       cwd,
@@ -143,10 +145,9 @@ func newModel(ctx context.Context, session *agent.Session, modelName, cwd string
 	// matching a terminal scrollback rather than the viewport's 3-line step.
 	m.viewport.MouseWheelEnabled = false
 	m.spin.Style = lipgloss.NewStyle().Foreground(th.accentColor)
-	m.blocks = historyBlocks(session)
 	m.layout()
 	m.paint()
-	if len(m.blocks) > 0 {
+	if len(m.tab().blocks) > 0 {
 		m.viewport.GotoBottom()
 	}
 	return m
@@ -255,8 +256,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case connectDoneMsg:
 		return m.onConnected(msg)
 
+	case openedMsg:
+		return m.onOpened(msg)
+
 	case spinner.TickMsg:
-		if !m.busy {
+		if !m.anyBusy() {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -277,7 +281,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishTurn(msg)
 	}
 
-	if m.busy || m.mode != modeChat {
+	if m.tab().busy || m.mode != modeChat {
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -294,7 +298,7 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.mode {
-	case modeModels, modeProviders:
+	case modeModels, modeProviders, modeSessions:
 		return m.onPickerKey(msg)
 	case modeConnect:
 		return m.onConnectKey(msg)
@@ -308,13 +312,13 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		if m.busy {
-			m.cancelTurn()
+		if m.tab().busy {
+			m.stopTurn(m.tab())
 			return m, nil
 		}
 		return m.quit()
 	case "ctrl+d":
-		if m.busy || strings.TrimSpace(m.input.Value()) != "" {
+		if m.tab().busy || strings.TrimSpace(m.input.Value()) != "" {
 			break
 		}
 		return m.quit()
@@ -333,7 +337,7 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "enter", "ctrl+m":
-		if m.busy {
+		if m.tab().busy {
 			return m, nil
 		}
 		m.acceptCommand()
@@ -342,7 +346,7 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.completeCommand()
 	}
 
-	if m.busy {
+	if m.tab().busy {
 		return m, nil
 	}
 	m.stopComplete()
@@ -353,7 +357,7 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) moveCommand(delta int) bool {
-	if m.busy {
+	if m.tab().busy {
 		return false
 	}
 	done := command.Complete(m.input.Value(), m.completeIndex)
@@ -370,7 +374,7 @@ func (m *model) moveCommand(delta int) bool {
 }
 
 func (m *model) completeCommand() (tea.Model, tea.Cmd) {
-	if m.busy || !m.acceptCommand() {
+	if m.tab().busy || !m.acceptCommand() {
 		return m, nil
 	}
 	m.layout()
@@ -397,7 +401,7 @@ func (m *model) stopComplete() {
 }
 
 func (m *model) commandOverlay() string {
-	if m.mode != modeChat || m.busy {
+	if m.mode != modeChat || m.tab().busy {
 		return ""
 	}
 	done := command.Complete(m.input.Value(), m.completeIndex)
@@ -431,6 +435,12 @@ func (m *model) submit() tea.Cmd {
 			return m.openProviders()
 		}
 		return m.beginConnect(parsed.Arg)
+	case command.KindNew:
+		m.input.Reset()
+		return m.openSession()
+	case command.KindSessions:
+		m.input.Reset()
+		return m.openSessions()
 	case command.KindError:
 		m.input.Reset()
 		m.addBlock(block{kind: blockError, text: parsed.Err.Error()})
@@ -440,7 +450,7 @@ func (m *model) submit() tea.Cmd {
 		panic(fmt.Sprintf("unhandled command kind %d", parsed.Kind))
 	}
 
-	if m.session == nil {
+	if m.session() == nil {
 		m.input.Reset()
 		m.addBlock(block{kind: blockError, text: "select a model with /models"})
 		return nil
@@ -448,85 +458,144 @@ func (m *model) submit() tea.Cmd {
 
 	m.input.Reset()
 	m.input.Blur()
-	m.busy = true
-	m.status = "thinking"
-	m.answered = false
-	m.answerOpen = false
-	m.reasoningOpen = false
+	spinning := m.anyBusy()
+	item := m.tab()
+	item.nameFromPrompt(text)
+	item.busy = true
+	item.state = statusWorking
+	item.activity = "thinking"
+	item.answered = false
+	item.answerOpen = false
+	item.reasoningOpen = false
 	m.addBlock(block{kind: blockUser, text: text})
-	m.layout()
-	m.paint()
 
-	m.turnID++
-	id := m.turnID
+	item.turnID++
+	turn := item.turnID
+	tabID := item.id
 	ctx, cancel := context.WithCancel(m.ctx)
-	m.cancel = cancel
+	item.cancel = cancel
 
 	ch := make(chan tea.Msg, eventBuffer)
-	session := m.session
+	session := item.session
 	go func() {
 		defer close(ch)
 		answer, err := session.Turn(ctx, text, func(ev agent.Event) {
-			ch <- eventMsg{id: id, event: ev}
+			ch <- eventMsg{tabID: tabID, id: turn, event: ev}
 		})
-		ch <- turnDoneMsg{id: id, answer: answer, err: err}
+		ch <- turnDoneMsg{tabID: tabID, id: turn, answer: answer, err: err}
 	}()
-	m.events = ch
+	item.events = ch
+	if spinning {
+		return waitEvent(ch)
+	}
 	return tea.Batch(waitEvent(ch), m.spin.Tick)
 }
 
+func (m *model) openSession() tea.Cmd {
+	if m.director == nil || !m.director.Ready() || m.session() == nil {
+		m.addBlock(block{kind: blockError, text: "select a model with /models"})
+		return nil
+	}
+	director := m.director
+	ctx := m.ctx
+	return func() tea.Msg {
+		session, err := director.Open(ctx)
+		return openedMsg{session: session, err: err}
+	}
+}
+
+func (m *model) openSessions() tea.Cmd {
+	if m.sessionCount() == 0 {
+		m.addBlock(block{kind: blockError, text: "select a model with /models"})
+		return nil
+	}
+	m.mode = modeSessions
+	m.filter = ""
+	m.cursor = m.focusedChoice()
+	m.pickerErr = ""
+	m.layout()
+	m.paint()
+	return nil
+}
+
+func (m *model) onOpened(msg openedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.addBlock(block{kind: blockError, text: msg.err.Error()})
+		return m, m.input.Focus()
+	}
+	m.adoptSession(msg.session)
+	return m, m.input.Focus()
+}
+
 func (m *model) finishTurn(msg turnDoneMsg) (tea.Model, tea.Cmd) {
-	if msg.id != m.turnID {
-		if m.busy {
-			return m, waitEvent(m.events)
+	item := m.tabByID(msg.tabID)
+	if item == nil {
+		return m, nil
+	}
+	if msg.id != item.turnID {
+		if item.busy {
+			return m, waitEvent(item.events)
 		}
 		return m, nil
 	}
-	m.cancelTurn()
+	m.stopTurn(item)
 	if m.ctx.Err() != nil {
 		m.exitErr = m.ctx.Err()
 		m.quitting = true
 		return m, tea.Quit
 	}
 
-	m.busy = false
-	m.status = ""
-	m.answerOpen = false
-	showedReasoning := m.reasoningOpen
-	m.reasoningOpen = false
+	item.busy = false
+	item.activity = ""
+	item.answerOpen = false
+	showedReasoning := item.reasoningOpen
+	item.reasoningOpen = false
 	switch {
 	case msg.err == nil:
-		if !m.answered && !showedReasoning && strings.TrimSpace(msg.answer) != "" {
-			m.addBlock(block{kind: blockAssistant, text: msg.answer})
+		item.state = statusDone
+		if !item.answered && !showedReasoning && strings.TrimSpace(msg.answer) != "" {
+			item.blocks = append(item.blocks, block{kind: blockAssistant, text: msg.answer})
 		}
 	case errors.Is(msg.err, context.Canceled), errors.Is(msg.err, context.DeadlineExceeded):
-		m.addBlock(block{kind: blockNote, text: "interrupted"})
+		item.state = statusInterrupted
+		item.blocks = append(item.blocks, block{kind: blockNote, text: "interrupted"})
 	default:
-		m.addBlock(block{kind: blockError, text: msg.err.Error()})
+		item.state = statusError
+		item.blocks = append(item.blocks, block{kind: blockError, text: msg.err.Error()})
 	}
-	m.answered = false
+	item.answered = false
+	if item.id != m.tab().id {
+		return m, nil
+	}
 	m.layout()
 	m.paint()
 	return m, m.input.Focus()
 }
 
 func (m *model) onEvents(msg eventMsg) tea.Cmd {
-	if !m.applyEvent(msg) {
-		if m.busy {
-			return waitEvent(m.events)
+	item := m.tabByID(msg.tabID)
+	if item == nil {
+		return nil
+	}
+	if !m.applyEvent(item, msg) {
+		if item.busy {
+			return waitEvent(item.events)
 		}
 		return nil
 	}
+	focused := item.id == m.tab().id
 	for {
 		select {
-		case next, ok := <-m.events:
+		case next, ok := <-item.events:
 			if !ok {
-				m.paint()
+				if focused {
+					m.paint()
+				}
 				return nil
 			}
 			switch next := next.(type) {
 			case eventMsg:
-				m.applyEvent(next)
+				m.applyEvent(item, next)
 			case turnDoneMsg:
 				_, cmd := m.finishTurn(next)
 				return cmd
@@ -534,68 +603,73 @@ func (m *model) onEvents(msg eventMsg) tea.Cmd {
 				panic(fmt.Sprintf("unhandled turn message %T", next))
 			}
 		default:
-			return tea.Batch(m.schedulePaint(), waitEvent(m.events))
+			if !focused {
+				return waitEvent(item.events)
+			}
+			return tea.Batch(m.schedulePaint(), waitEvent(item.events))
 		}
 	}
 }
 
-func (m *model) applyEvent(msg eventMsg) bool {
-	if msg.id != m.turnID {
+func (m *model) applyEvent(item *tab, msg eventMsg) bool {
+	if msg.id != item.turnID {
 		return false
 	}
 	switch ev := msg.event.(type) {
 	case agent.ReasoningDelta:
-		m.appendReasoning(ev.Text)
+		m.appendReasoning(item, ev.Text)
 	case agent.AnswerDelta:
-		m.appendAnswer(ev.Text)
+		m.appendAnswer(item, ev.Text)
 	case agent.ToolStart:
-		m.answerOpen = false
-		m.reasoningOpen = false
-		m.status = strings.TrimSpace(toolLabel(ev.Name) + " " + ev.Detail)
-		m.addBlock(block{
+		item.answerOpen = false
+		item.reasoningOpen = false
+		item.activity = strings.TrimSpace(toolLabel(ev.Name) + " " + ev.Detail)
+		item.blocks = append(item.blocks, block{
 			kind:   blockTool,
 			tool:   ev.Name,
 			detail: ev.Detail,
 			toolID: ev.ID,
 		})
 	case agent.ToolDone:
-		m.markTool(ev)
+		m.markTool(item, ev)
 	default:
 		panic(fmt.Sprintf("unhandled agent event %T", msg.event))
 	}
-	m.dirty = true
+	if item.id == m.tab().id {
+		m.dirty = true
+	}
 	return true
 }
 
-func (m *model) appendAnswer(text string) {
-	m.status = "answering"
-	m.answered = true
-	m.reasoningOpen = false
-	last := len(m.blocks) - 1
-	if m.answerOpen && last >= 0 && m.blocks[last].kind == blockAssistant {
-		m.blocks[last].text += text
+func (m *model) appendAnswer(item *tab, text string) {
+	item.activity = "answering"
+	item.answered = true
+	item.reasoningOpen = false
+	last := len(item.blocks) - 1
+	if item.answerOpen && last >= 0 && item.blocks[last].kind == blockAssistant {
+		item.blocks[last].text += text
 		return
 	}
-	m.answerOpen = true
-	m.blocks = append(m.blocks, block{kind: blockAssistant, text: text})
+	item.answerOpen = true
+	item.blocks = append(item.blocks, block{kind: blockAssistant, text: text})
 }
 
-func (m *model) appendReasoning(text string) {
-	m.status = "thinking"
-	last := len(m.blocks) - 1
-	if m.reasoningOpen && last >= 0 && m.blocks[last].kind == blockReasoning {
-		m.blocks[last].text += text
+func (m *model) appendReasoning(item *tab, text string) {
+	item.activity = "thinking"
+	last := len(item.blocks) - 1
+	if item.reasoningOpen && last >= 0 && item.blocks[last].kind == blockReasoning {
+		item.blocks[last].text += text
 		return
 	}
-	m.reasoningOpen = true
-	m.blocks = append(m.blocks, block{kind: blockReasoning, text: text})
+	item.reasoningOpen = true
+	item.blocks = append(item.blocks, block{kind: blockReasoning, text: text})
 }
 
-func (m *model) markTool(ev agent.ToolDone) {
-	for i := range m.blocks {
-		if m.blocks[i].kind == blockTool && m.blocks[i].toolID == ev.ID {
-			m.blocks[i].done = true
-			m.blocks[i].failed = ev.Err != nil
+func (m *model) markTool(item *tab, ev agent.ToolDone) {
+	for i := range item.blocks {
+		if item.blocks[i].kind == blockTool && item.blocks[i].toolID == ev.ID {
+			item.blocks[i].done = true
+			item.blocks[i].failed = ev.Err != nil
 			return
 		}
 	}
@@ -618,27 +692,22 @@ func (m *model) schedulePaint() tea.Cmd {
 }
 
 func (m *model) quit() (tea.Model, tea.Cmd) {
-	m.cancelTurn()
+	for i := range m.tabs {
+		m.stopTurn(&m.tabs[i])
+	}
 	m.quitting = true
 	return m, tea.Quit
 }
 
-func (m *model) cancelTurn() {
-	if m.cancel == nil {
-		return
-	}
-	m.cancel()
-	m.cancel = nil
-}
-
 func (m *model) addBlock(b block) {
-	m.blocks = append(m.blocks, b)
+	item := m.tab()
+	item.blocks = append(item.blocks, b)
 	m.paint()
 }
 
 func (m *model) onWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	switch m.mode {
-	case modeModels, modeProviders:
+	case modeModels, modeProviders, modeSessions:
 		m.wheelPicker(msg.Button)
 		return m, nil
 	case modeConnect:
@@ -657,7 +726,7 @@ func (m *model) wheelPicker(button tea.MouseButton) {
 			m.cursor--
 		}
 	case 1:
-		if m.cursor+1 < len(m.pickerIDs()) {
+		if m.cursor+1 < m.choiceCount() {
 			m.cursor++
 		}
 	}
@@ -668,7 +737,7 @@ func (m *model) wheelChat(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	if lines == 0 {
 		return m, nil
 	}
-	if m.pointerOverInput(msg.Y) && !m.busy {
+	if m.pointerOverInput(msg.Y) && !m.tab().busy {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		m.layout()
@@ -703,13 +772,17 @@ func (m *model) pointerOverInput(y int) bool {
 }
 
 func (m *model) paint() {
+	m.paintFollow(m.viewport.AtBottom())
+}
+
+func (m *model) paintFollow(follow bool) {
 	m.dirty = false
 	m.lastPaint = time.Now()
-	follow := m.viewport.AtBottom()
-	m.viewport.SetWidth(m.usableWidth())
+	col := m.transcriptColumnWidth()
+	m.viewport.SetWidth(col)
 	m.viewport.SetContent(m.renderTranscript())
-	if m.transcriptOverflows() && m.usableWidth() > 1 {
-		m.viewport.SetWidth(m.usableWidth() - 1)
+	if m.transcriptOverflows() && col > 1 {
+		m.viewport.SetWidth(col - 1)
 		m.viewport.SetContent(m.renderTranscript())
 	}
 	if follow {
@@ -750,8 +823,19 @@ func (m *model) transcriptOverflows() bool {
 	return m.viewport.Height() > 0 && m.viewport.TotalLineCount() > m.viewport.Height()
 }
 
-func (m *model) transcriptWidth() int {
+func (m *model) transcriptColumnWidth() int {
 	width := m.usableWidth()
+	if m.showPanel() {
+		width -= panelWidth
+	}
+	if width < 1 {
+		return 1
+	}
+	return width
+}
+
+func (m *model) transcriptWidth() int {
+	width := m.transcriptColumnWidth()
 	if m.transcriptOverflows() && width > 1 {
 		return width - 1
 	}
@@ -795,10 +879,13 @@ func (m *model) View() tea.View {
 }
 
 func (m *model) programStatus() *tea.ProgramStatus {
-	if m.busy {
-		message := m.status
-		if message == "" {
-			message = "thinking"
+	if m.anyBusy() {
+		message := "working"
+		if m.tab().busy {
+			message = m.tab().activity
+			if message == "" {
+				message = "thinking"
+			}
 		}
 		return &tea.ProgramStatus{
 			State:   tea.ProgramStateWorking,

@@ -35,7 +35,7 @@ var _ Chatter = (*openai.Client)(nil)
 // If the model is still calling tools after that, one more call is made with no tools.
 const maxToolRounds = 8
 
-// Session is the in-memory conversation for one process.
+// Session is one in-memory conversation.
 type Session struct {
 	client   Chatter
 	model    string
@@ -67,6 +67,11 @@ func NewSession(client Chatter, model, cwd string, recorder Recorder) *Session {
 func (s *Session) SetModel(client Chatter, model string) {
 	s.client = client
 	s.model = model
+}
+
+// Model is the wire model id for later turns.
+func (s *Session) Model() string {
+	return s.model
 }
 
 // DropRecorder turns history off for the rest of the process.

@@ -2,7 +2,7 @@
 
 `co` is a read-only coding assistant for the directory you start it in. It talks to OpenAI-compatible chat endpoints, and the model may list, read, and search files inside that directory. It cannot write files or leave the directory, including through symlinks.
 
-A terminal on both stdin and stdout gets a Bubble Tea TUI. A pipe or a redirect gets a line reader. Both share one session.
+A terminal on both stdin and stdout gets a Bubble Tea TUI, which can hold more than one session. A pipe or a redirect gets a line reader with one session.
 
 ## Install
 
@@ -123,12 +123,16 @@ With no model selected, a terminal opens the model picker. Anything else exits a
 | Line | |
 | --- | --- |
 | `/models` | List configured models. In the TUI this opens a picker. |
-| `/models provider/model-id` | Switch model. The choice is saved to `~/.co/config.yaml`, unless `--config` was set. |
+| `/models provider/model-id` | Switch the model for the session on screen. The choice is saved to `~/.co/config.yaml`, unless `--config` was set. |
 | `/connect` | List providers that accept an API key. |
 | `/connect provider` | Save an API key for that provider. |
+| `/new` | Start another session in the TUI and show it. Other sessions keep running. |
+| `/sessions` | Switch the session on screen. In the TUI this opens a picker. |
 | `exit`, `quit` | Leave. When a transcript was written, `co` prints the id to resume. |
 
-In the TUI, Tab completes `/models` and `/connect`. Enter sends, Ctrl+J inserts a newline, and Ctrl+C quits. The transcript fills the terminal. The mouse wheel, trackpad, PgUp, and PgDn scroll it, and it stays pinned to the bottom until you scroll up. Ctrl+C during a turn stops that turn.
+`/new` and `/sessions` are TUI commands. The line reader keeps a single session.
+
+In the TUI, Tab completes `/models`, `/connect`, `/new`, and `/sessions`. Enter sends, Ctrl+J inserts a newline, and Ctrl+C quits. The transcript fills the terminal, with a session list on the right when the terminal is at least 60 columns wide. Each row is a status (`new`, `working`, `done`, `interrupted`, or `error`) and the first line of that session's first prompt. The list is only the sessions opened in this TUI. The mouse wheel, trackpad, PgUp, and PgDn scroll the transcript, and it stays pinned to the bottom until you scroll up. Ctrl+C during a turn stops that turn. Other sessions keep going. Ctrl+C while the session on screen is idle quits.
 
 When stdin or stdout is not a terminal, the prompt is `> ` on stderr. The answer is written to stdout. Reasoning and tool lines go to stderr.
 
@@ -140,7 +144,7 @@ Each directory gets its own transcripts:
 ~/.co/projects/<project>/sessions/<id>.jsonl
 ```
 
-`<project>` is the absolute path with every separator replaced by `-`. The file is mode `0600` and is created on the first completed message, so quitting before that leaves nothing behind. `--resume latest` opens the most recently modified file for this directory. A trailing partial line, from a crash during a write, is dropped.
+`<project>` is the absolute path with every separator replaced by `-`. The file is mode `0600` and is created on the first completed message, so quitting before that leaves nothing behind. Each session opened in the TUI gets its own file. `--resume latest` opens the most recently modified file for this directory as the first session. A trailing partial line, from a crash during a write, is dropped. The on-disk list below is not the TUI panel.
 
 ```sh
 co session list

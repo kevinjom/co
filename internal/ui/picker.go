@@ -80,8 +80,9 @@ func (m *model) selectModel(ref string, fromPicker bool) tea.Cmd {
 	m.pickerErr = ""
 	director := m.director
 	ctx := m.ctx
+	session := m.session()
 	return func() tea.Msg {
-		err := director.Select(ctx, ref)
+		err := director.Select(ctx, ref, session)
 		return selectDoneMsg{err: err, fromPicker: fromPicker}
 	}
 }
@@ -99,7 +100,9 @@ func (m *model) onSelected(msg selectDoneMsg) (tea.Model, tea.Cmd) {
 		return m, m.input.Focus()
 	}
 	m.modelName = m.director.Model()
-	m.session = m.director.Session()
+	if m.session() == nil {
+		m.adoptSession(m.director.Session())
+	}
 	first := m.startup
 	m.mode = modeChat
 	m.startup = false
@@ -158,7 +161,7 @@ func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m.quit()
 	case "esc":
-		if m.session == nil {
+		if m.session() == nil {
 			return m.quit()
 		}
 		m.mode = modeChat
@@ -168,6 +171,9 @@ func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.paint()
 		return m, m.input.Focus()
 	case "enter", "ctrl+m":
+		if m.mode == modeSessions {
+			return m.chooseSession()
+		}
 		ids := m.pickerIDs()
 		if len(ids) == 0 {
 			m.pickerErr = m.emptyListText()
@@ -193,7 +199,7 @@ func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "down":
-		if m.cursor+1 < len(m.pickerIDs()) {
+		if m.cursor+1 < m.choiceCount() {
 			m.cursor++
 			m.paint()
 		}
@@ -292,7 +298,7 @@ func (m *model) onPaste(text string) (tea.Model, tea.Cmd) {
 		m.pickerErr = ""
 		m.paint()
 		return m, nil
-	case modeModels, modeProviders:
+	case modeModels, modeProviders, modeSessions:
 		line, _, _ := strings.Cut(text, "\n")
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -305,7 +311,7 @@ func (m *model) onPaste(text string) (tea.Model, tea.Cmd) {
 		m.paint()
 		return m, nil
 	case modeChat:
-		if m.busy {
+		if m.tab().busy {
 			return m, nil
 		}
 		m.stopComplete()
@@ -343,6 +349,33 @@ func (m *model) onConnected(msg connectDoneMsg) (tea.Model, tea.Cmd) {
 	m.layout()
 	m.paint()
 	return m, m.input.Focus()
+}
+
+func (m *model) chooseSession() (tea.Model, tea.Cmd) {
+	choices := m.sessionChoices()
+	if len(choices) == 0 {
+		m.pickerErr = "no matching session"
+		m.layout()
+		m.paint()
+		return m, nil
+	}
+	if m.cursor >= len(choices) {
+		m.cursor = 0
+	}
+	m.switchTo(choices[m.cursor])
+	m.mode = modeChat
+	m.filter = ""
+	m.pickerErr = ""
+	m.layout()
+	m.paint()
+	return m, m.input.Focus()
+}
+
+func (m *model) choiceCount() int {
+	if m.mode == modeSessions {
+		return len(m.sessionChoices())
+	}
+	return len(m.pickerIDs())
 }
 
 func (m *model) pickerIDs() []string {
@@ -386,7 +419,7 @@ func (m *model) inputView() string {
 	switch m.mode {
 	case modeChat:
 		return inputChrome(m.input.Focused(), m.theme).Render(m.input.View())
-	case modeModels, modeProviders:
+	case modeModels, modeProviders, modeSessions:
 		return m.theme.dim.Render(ansi.Truncate("filter: "+m.filter, m.usableWidth(), "…"))
 	case modeConnect:
 		dots := strings.Repeat("•", len([]rune(m.secret)))
@@ -405,6 +438,8 @@ func (m *model) overlayView() string {
 		return m.choiceOverlay(!m.modelsLoaded, "loading models")
 	case modeProviders:
 		return m.choiceOverlay(false, "")
+	case modeSessions:
+		return m.sessionOverlay()
 	case modeConnect:
 		if m.pickerErr == "" {
 			return ""
@@ -430,6 +465,25 @@ func (m *model) choiceOverlay(loading bool, loadingText string) string {
 	default:
 		lines = append(lines, m.choiceLines(ids, m.cursor)...)
 	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *model) sessionOverlay() string {
+	width := m.usableWidth()
+	lines := []string{}
+	if m.pickerErr != "" {
+		lines = append(lines, m.theme.bad.Render(ansi.Truncate(m.pickerErr, width, "…")))
+	}
+	choices := m.sessionChoices()
+	if len(choices) == 0 {
+		lines = append(lines, m.theme.dim.Render("no matching session"))
+		return strings.Join(lines, "\n")
+	}
+	labels := make([]string, len(choices))
+	for i, index := range choices {
+		labels[i] = m.tabs[index].title
+	}
+	lines = append(lines, m.choiceLines(labels, m.cursor)...)
 	return strings.Join(lines, "\n")
 }
 

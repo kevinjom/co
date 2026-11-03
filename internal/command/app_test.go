@@ -14,8 +14,8 @@ import (
 func TestOpenKeepsSessionsIndependent(t *testing.T) {
 	home := t.TempDir()
 	cwd := t.TempDir()
-	config := `
-model: ollama/alpha
+	settings := "model: ollama/alpha\n"
+	models := `
 providers:
   ollama:
     base_url: http://127.0.0.1:11434
@@ -27,7 +27,10 @@ providers:
 	if err := os.MkdirAll(filepath.Join(home, ".co"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(provider.HomeConfig(home), []byte(config), 0o600); err != nil {
+	if err := os.WriteFile(provider.HomeConfig(home), []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(provider.HomeModels(home), []byte(models), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cat, err := provider.Load(provider.LoadOptions{Home: home, ProjectDir: cwd})

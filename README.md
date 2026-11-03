@@ -34,7 +34,7 @@ With the `ollama` binary installed:
 co ollama
 ```
 
-This talks to `http://127.0.0.1:11434`, starts a local daemon when it is down, and asks you to pick a model when none is already loaded. It writes an `ollama` provider into `~/.co/config.yaml` and, in a terminal, opens the session on that model.
+This talks to `http://127.0.0.1:11434`, starts a local daemon when it is down, and asks you to pick a model when none is already loaded. It writes an `ollama` provider into `~/.co/models.yaml`, the chosen model into `~/.co/config.yaml`, and, in a terminal, opens the session on that model.
 
 ```sh
 co ollama --host http://127.0.0.1:11434
@@ -46,10 +46,20 @@ co ollama --host http://127.0.0.1:11434
 
 Providers live in YAML. A model is `provider/model-id`. The model id may contain further slashes, as in `openrouter/qwen/qwen3-coder`.
 
-`~/.co/config.yaml`:
+`~/.co/config.yaml` is the settings file. It holds the default model and the flags that are safe to keep:
 
 ```yaml
 model: openrouter/qwen/qwen3-coder
+log-level: info
+no-history: false
+clear-scrollback: false
+```
+
+`log-level` is `debug`, `info`, `warn`, or `error`. `no-history` skips the transcript. `clear-scrollback` erases the terminal scrollback before the TUI starts. A flag or its environment variable wins over the file. `resume` is not read from the file.
+
+`~/.co/models.yaml` is the provider catalog:
+
+```yaml
 providers:
   ollama:
     base_url: http://127.0.0.1:11434
@@ -79,9 +89,11 @@ providers:
 | `--model`, or `CO_MODEL` | Model for this process. Does not change the config file. |
 | `model` in `~/.co/config.yaml` | Default model. |
 | `model` in `./.co.yaml` | Default model when the home file has none. |
+| `providers` in `~/.co/models.yaml` | Home providers. |
 | `providers` in `./.co.yaml` | Replaces the home provider with the same id. Other home providers stay. |
+| `log-level`, `no-history`, `clear-scrollback` in `~/.co/config.yaml` | Defaults for those flags. |
 
-`--config path` uses that file alone for providers and the default model. It does not read `~/.co/config.yaml` or `./.co.yaml`, and `/models` does not write the home file. Keys still come from the environment and `~/.co/credentials.json`.
+`--config path` uses that file alone for flags, providers, and the default model. It does not read `~/.co/config.yaml`, `~/.co/models.yaml`, or `./.co.yaml`, and `/models` does not write the home file. Keys still come from the environment and `~/.co/credentials.json`.
 
 `./.co.yaml` is per project. Leave it out of git if it names private endpoints.
 
@@ -107,14 +119,14 @@ co session list
 
 With no model selected, a terminal opens the model picker. Anything else exits and asks for `--model` or `model` in `~/.co/config.yaml`.
 
-| Flag | Environment | |
-| --- | --- | --- |
-| `--config` | | Config file. Replaces the home and project files. |
-| `--log-level` | `CO_LOG_LEVEL` | `debug`, `info`, `warn`, or `error`. Default `info`. Logs go to stderr. |
-| `--model` | `CO_MODEL` | `provider/model-id` for this process. |
-| `--resume` | `CO_RESUME` | A session id, or `latest` for the newest session in this directory. |
-| `--no-history` | `CO_NO_HISTORY` | Do not write the transcript. |
-| `--clear-scrollback` | `CO_CLEAR_SCROLLBACK` | Erase the terminal scrollback before the TUI starts. Off unless set. |
+| Flag | Environment | `config.yaml` | |
+| --- | --- | --- | --- |
+| `--config` | | | Replaces the home and project files. |
+| `--log-level` | `CO_LOG_LEVEL` | `log-level` | `debug`, `info`, `warn`, or `error`. Default `info`. Logs go to stderr. |
+| `--model` | `CO_MODEL` | `model` | `provider/model-id` for this process. The file value is the default model. |
+| `--resume` | `CO_RESUME` | | A session id, or `latest` for the newest session in this directory. Not read from the file. |
+| `--no-history` | `CO_NO_HISTORY` | `no-history` | Do not write the transcript. |
+| `--clear-scrollback` | `CO_CLEAR_SCROLLBACK` | `clear-scrollback` | Erase the terminal scrollback before the TUI starts. Off unless set. |
 
 `CO_` is the environment prefix, and `-` in a flag name becomes `_`.
 

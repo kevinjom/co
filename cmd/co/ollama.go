@@ -98,7 +98,7 @@ func runOllama(cmd *cobra.Command, _ []string) error {
 		slices.Sort(installed)
 	}
 
-	path, err := ollamaConfigPath(cmd)
+	configPath, modelsPath, err := ollamaFiles(cmd)
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func runOllama(cmd *cobra.Command, _ []string) error {
 			ReasoningDelta:  true,
 		},
 	}
-	if err := provider.WriteProvider(path, spec); err != nil {
+	if err := provider.WriteProvider(configPath, modelsPath, spec); err != nil {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "model: ollama/%s\n", chosen)
@@ -208,19 +208,22 @@ func localDaemon(host string) bool {
 	}
 }
 
-func ollamaConfigPath(cmd *cobra.Command) (string, error) {
+// ollamaFiles is the settings file and the provider catalog.
+// --config keeps both in that one file. Otherwise the model goes to
+// ~/.co/config.yaml and the provider goes to ~/.co/models.yaml.
+func ollamaFiles(cmd *cobra.Command) (string, string, error) {
 	file, err := cmd.Flags().GetString("config")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if file != "" {
-		return file, nil
+		return file, file, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("finding home directory: %w", err)
+		return "", "", fmt.Errorf("finding home directory: %w", err)
 	}
-	return provider.HomeConfig(home), nil
+	return provider.HomeConfig(home), provider.HomeModels(home), nil
 }
 
 func startOllamaServe(host string) error {

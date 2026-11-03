@@ -30,7 +30,8 @@ func (e *NeedsKeyError) Error() string {
 }
 
 // LoadOptions chooses which files and overrides build a catalog.
-// ConfigFile replaces the home and project files.
+// ConfigFile replaces ~/.co/config.yaml, ~/.co/models.yaml, and the project file.
+// That file may contain the default model, flags, and providers.
 type LoadOptions struct {
 	Home       string
 	ProjectDir string
@@ -40,28 +41,34 @@ type LoadOptions struct {
 
 // Catalog is the merged set of providers for one process.
 type Catalog struct {
-	homeDir   string
-	homeFile  string
-	isolated  bool
-	flag      string
-	home      string
-	project   string
-	providers map[string]Provider
-	keys      map[string]string
+	homeDir    string
+	configFile string
+	isolated   bool
+	flag       string
+	home       string
+	project    string
+	providers  map[string]Provider
+	keys       map[string]string
 }
 
-// HomeConfig is the user config file, ~/.co/config.yaml.
+// HomeConfig is the user settings file, ~/.co/config.yaml.
+// It holds the default model and the supported flags.
 func HomeConfig(home string) string {
 	return filepath.Join(home, ".co", "config.yaml")
 }
 
-// Load reads config and credentials.
+// HomeModels is the provider catalog, ~/.co/models.yaml.
+func HomeModels(home string) string {
+	return filepath.Join(home, ".co", "models.yaml")
+}
+
+// Load reads settings, the provider catalog, and credentials.
 func Load(opt LoadOptions) (*Catalog, error) {
 	cat := &Catalog{
-		homeDir:  opt.Home,
-		homeFile: HomeConfig(opt.Home),
-		flag:     strings.TrimSpace(opt.FlagModel),
-		keys:     map[string]string{},
+		homeDir:    opt.Home,
+		configFile: HomeConfig(opt.Home),
+		flag:       strings.TrimSpace(opt.FlagModel),
+		keys:       map[string]string{},
 	}
 
 	var layers []map[string]Provider
@@ -81,7 +88,11 @@ func Load(opt LoadOptions) (*Catalog, error) {
 		layers = append(layers, parsed)
 		cat.project = strings.TrimSpace(doc.Model)
 	} else {
-		homeDoc, _, err := readDoc(cat.homeFile)
+		homeDoc, _, err := readDoc(cat.configFile)
+		if err != nil {
+			return nil, err
+		}
+		modelsDoc, _, err := readDoc(HomeModels(opt.Home))
 		if err != nil {
 			return nil, err
 		}
@@ -89,7 +100,7 @@ func Load(opt LoadOptions) (*Catalog, error) {
 		if err != nil {
 			return nil, err
 		}
-		homeProviders, err := providersFrom(homeDoc)
+		homeProviders, err := providersFrom(modelsDoc)
 		if err != nil {
 			return nil, err
 		}
@@ -231,7 +242,7 @@ func (c *Catalog) SaveSelection(model string) error {
 	if c.isolated {
 		return nil
 	}
-	if err := saveModelKey(c.homeFile, model); err != nil {
+	if err := saveModelKey(c.configFile, model); err != nil {
 		return err
 	}
 	c.home = model

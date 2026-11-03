@@ -41,6 +41,10 @@ func TestMergePrecedence(t *testing.T) {
 	writeYAML(t, HomeConfig(home), `
 model: ollama/from-home
 log-level: debug
+no-history: true
+clear-scrollback: true
+`)
+	writeYAML(t, HomeModels(home), `
 providers:
   ollama:
     base_url: http://home.example:11434
@@ -147,7 +151,7 @@ func TestHomeModelWinsOverProject(t *testing.T) {
 
 func TestProviderRequiresBaseURL(t *testing.T) {
 	home := t.TempDir()
-	writeYAML(t, HomeConfig(home), `
+	writeYAML(t, HomeModels(home), `
 providers:
   ollama:
     auth: none
@@ -161,7 +165,7 @@ providers:
 
 func TestConfiguredModelIsRequired(t *testing.T) {
 	home := t.TempDir()
-	writeYAML(t, HomeConfig(home), `
+	writeYAML(t, HomeModels(home), `
 providers:
   ollama:
     base_url: http://127.0.0.1:11434
@@ -199,7 +203,7 @@ providers:
 
 func TestProvidersSkipsAuthNone(t *testing.T) {
 	home := t.TempDir()
-	writeYAML(t, HomeConfig(home), `
+	writeYAML(t, HomeModels(home), `
 providers:
   ollama:
     base_url: http://127.0.0.1:11434
@@ -229,7 +233,7 @@ providers:
 
 func TestKeyFileLosesToEnv(t *testing.T) {
 	home := t.TempDir()
-	writeYAML(t, HomeConfig(home), `
+	writeYAML(t, HomeModels(home), `
 providers:
   openrouter:
     base_url: https://openrouter.ai/api/v1
@@ -325,16 +329,18 @@ func TestSaveSelectionPreservesOtherKeys(t *testing.T) {
 
 func TestProvidersFollowModel(t *testing.T) {
 	home := t.TempDir()
-	path := HomeConfig(home)
-	writeYAML(t, path, `
-log-level: debug
+	configPath := HomeConfig(home)
+	modelsPath := HomeModels(home)
+	writeYAML(t, configPath, "log-level: debug\n")
+	models := `
 providers:
   ollama:
     base_url: http://127.0.0.1:11434
     auth: none
     models:
       - qwen3:8b
-`)
+`
+	writeYAML(t, modelsPath, models)
 	cat, err := Load(LoadOptions{Home: home, ProjectDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -342,23 +348,30 @@ providers:
 	if err := cat.SaveSelection("ollama/qwen3:8b"); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(data)
 	modelAt := strings.Index(text, "model:")
-	providersAt := strings.Index(text, "providers:")
 	logAt := strings.Index(text, "log-level:")
-	if modelAt < 0 || providersAt < modelAt || logAt < providersAt {
+	if modelAt < 0 || logAt < modelAt || strings.Contains(text, "providers:") {
 		t.Fatalf("config:\n%s", text)
+	}
+	left, err := os.ReadFile(modelsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(left) != models {
+		t.Fatalf("models.yaml changed:\n%s", left)
 	}
 }
 
 func TestWriteProviderCreatesAndRefreshes(t *testing.T) {
 	home := t.TempDir()
-	path := HomeConfig(home)
-	err := WriteProvider(path, ProviderSpec{
+	configPath := HomeConfig(home)
+	modelsPath := HomeModels(home)
+	err := WriteProvider(configPath, modelsPath, ProviderSpec{
 		ID:       "ollama",
 		BaseURL:  "http://127.0.0.1:11434/",
 		AuthNone: true,
@@ -372,23 +385,24 @@ func TestWriteProviderCreatesAndRefreshes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	configText := readTestFile(t, configPath)
+	if !strings.Contains(configText, `model: "ollama/a"`) || strings.Contains(configText, "providers:") {
+		t.Fatalf("config:\n%s", configText)
 	}
-	text := string(data)
-	modelAt := strings.Index(text, "model:")
-	providersAt := strings.Index(text, "providers:")
-	if modelAt < 0 || providersAt < modelAt || !strings.Contains(text, `model: "ollama/a"`) {
-		t.Fatalf("config:\n%s", text)
+	modelsText := readTestFile(t, modelsPath)
+	if strings.Contains(modelsText, "model:") || !strings.Contains(modelsText, "providers:") {
+		t.Fatalf("models:\n%s", modelsText)
 	}
-	if !strings.Contains(text, "reasoning_effort: true") || !strings.Contains(text, "reasoning_delta: true") {
-		t.Fatalf("config:\n%s", text)
+	if !strings.Contains(modelsText, "reasoning_effort: true") || !strings.Contains(modelsText, "reasoning_delta: true") {
+		t.Fatalf("models:\n%s", modelsText)
 	}
 
-	writeYAML(t, path, `
+	writeYAML(t, configPath, `
 model: "openrouter/keep"
 log-level: debug
+no-history: true
+`)
+	writeYAML(t, modelsPath, `
 providers:
   ollama:
     base_url: http://old.example:11434
@@ -400,7 +414,7 @@ providers:
       reasoning_effort: false
       reasoning_delta: false
 `)
-	err = WriteProvider(path, ProviderSpec{
+	err = WriteProvider(configPath, modelsPath, ProviderSpec{
 		ID:       "ollama",
 		BaseURL:  "http://127.0.0.1:11434",
 		AuthNone: true,
@@ -414,31 +428,30 @@ providers:
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err = os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	configText = readTestFile(t, configPath)
+	modelAt := strings.Index(configText, "model:")
+	logAt := strings.Index(configText, "log-level:")
+	if modelAt < 0 || logAt < modelAt || !strings.Contains(configText, `model: "openrouter/keep"`) {
+		t.Fatalf("config:\n%s", configText)
 	}
-	text = string(data)
-	modelAt = strings.Index(text, "model:")
-	providersAt = strings.Index(text, "providers:")
-	logAt := strings.Index(text, "log-level:")
-	if modelAt < 0 || providersAt < modelAt || logAt < providersAt {
-		t.Fatalf("config:\n%s", text)
+	if !strings.Contains(configText, "log-level: debug") || !strings.Contains(configText, "no-history: true") {
+		t.Fatalf("config:\n%s", configText)
 	}
-	if !strings.Contains(text, `model: "openrouter/keep"`) || !strings.Contains(text, "http://127.0.0.1:11434") {
-		t.Fatalf("config:\n%s", text)
+	if strings.Contains(configText, "providers:") || strings.Contains(configText, "old.example") {
+		t.Fatalf("config:\n%s", configText)
 	}
-	if strings.Contains(text, "old.example") || strings.Contains(text, "reasoning_effort: true") {
-		t.Fatalf("config:\n%s", text)
+	modelsText = readTestFile(t, modelsPath)
+	if strings.Contains(modelsText, "model:") || strings.Contains(modelsText, "old.example") || strings.Contains(modelsText, "reasoning_effort: true") {
+		t.Fatalf("models:\n%s", modelsText)
 	}
-	if !strings.Contains(text, "api_key_env: UNUSED") {
-		t.Fatalf("config:\n%s", text)
+	if !strings.Contains(modelsText, "http://127.0.0.1:11434") || !strings.Contains(modelsText, "api_key_env: UNUSED") {
+		t.Fatalf("models:\n%s", modelsText)
 	}
-	if !strings.Contains(text, "log-level: debug") || !strings.Contains(text, `"qwen3:8b"`) {
-		t.Fatalf("config:\n%s", text)
+	if !strings.Contains(modelsText, `"qwen3:8b"`) {
+		t.Fatalf("models:\n%s", modelsText)
 	}
 
-	err = WriteProvider(path, ProviderSpec{
+	err = WriteProvider(configPath, modelsPath, ProviderSpec{
 		ID:       "ollama",
 		BaseURL:  "http://127.0.0.1:11434",
 		AuthNone: true,
@@ -448,12 +461,67 @@ providers:
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err = os.ReadFile(path)
+	configText = readTestFile(t, configPath)
+	if !strings.Contains(configText, `model: "ollama/qwen3:8b"`) || !strings.Contains(configText, "log-level: debug") {
+		t.Fatalf("config:\n%s", configText)
+	}
+}
+
+func TestWriteProviderCombinedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "only.yaml")
+	err := WriteProvider(path, path, ProviderSpec{
+		ID:           "ollama",
+		BaseURL:      "http://127.0.0.1:11434/",
+		AuthNone:     true,
+		Models:       []string{"a"},
+		DefaultModel: "ollama/a",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `model: "ollama/qwen3:8b"`) {
-		t.Fatalf("config:\n%s", data)
+	text := readTestFile(t, path)
+	modelAt := strings.Index(text, "model:")
+	providersAt := strings.Index(text, "providers:")
+	if modelAt < 0 || providersAt < modelAt || !strings.Contains(text, `model: "ollama/a"`) {
+		t.Fatalf("config:\n%s", text)
+	}
+}
+
+func TestConfigProvidersAreNotTheCatalog(t *testing.T) {
+	home := t.TempDir()
+	writeYAML(t, HomeConfig(home), `
+model: ollama/from-config
+providers:
+  lmstudio:
+    base_url: http://config.example:1234/v1
+    auth: none
+    models:
+      - local
+`)
+	writeYAML(t, HomeModels(home), `
+providers:
+  ollama:
+    base_url: http://models.example:11434
+    auth: none
+    models:
+      - from-models
+`)
+	cat, err := Load(LoadOptions{Home: home, ProjectDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cat.Selected() != "ollama/from-config" {
+		t.Fatalf("selected %q", cat.Selected())
+	}
+	ollama, err := cat.Lookup("ollama")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ollama.BaseURL != "http://models.example:11434" || len(ollama.Models) != 1 || ollama.Models[0] != "from-models" {
+		t.Fatalf("ollama %+v", ollama)
+	}
+	if _, err := cat.Lookup("lmstudio"); err == nil {
+		t.Fatal("provider from config.yaml was loaded")
 	}
 }
 
@@ -500,4 +568,13 @@ func writeYAML(t *testing.T, path, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func readTestFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

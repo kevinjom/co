@@ -93,6 +93,55 @@ func startCLI(t *testing.T, stdin string, args ...string) (string, string, error
 	return stdout.String(), stderr.String(), runErr
 }
 
+func TestConfigFileSetsSupportedFlags(t *testing.T) {
+	prepare(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeHomeFile(t, provider.HomeConfig(home), `
+log-level: debug
+no-history: true
+clear-scrollback: true
+resume: latest
+`)
+
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if viper.GetString("log-level") != "debug" {
+		t.Fatalf("log-level %q", viper.GetString("log-level"))
+	}
+	if !viper.GetBool("no-history") || !viper.GetBool("clear-scrollback") {
+		t.Fatalf("no-history %v clear-scrollback %v", viper.GetBool("no-history"), viper.GetBool("clear-scrollback"))
+	}
+	if viper.GetString("resume") != "" {
+		t.Fatalf("resume from config %q", viper.GetString("resume"))
+	}
+
+	t.Setenv("CO_LOG_LEVEL", "error")
+	t.Setenv("CO_NO_HISTORY", "false")
+	t.Setenv("CO_CLEAR_SCROLLBACK", "false")
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if viper.GetString("log-level") != "error" || viper.GetBool("no-history") || viper.GetBool("clear-scrollback") {
+		t.Fatalf("log-level %q no-history %v clear-scrollback %v", viper.GetString("log-level"), viper.GetBool("no-history"), viper.GetBool("clear-scrollback"))
+	}
+
+	t.Setenv("CO_LOG_LEVEL", "")
+	t.Setenv("CO_NO_HISTORY", "")
+	t.Setenv("CO_CLEAR_SCROLLBACK", "")
+	_, _, err = startCLI(t, "", "--log-level", "warn", "--no-history=false", "--clear-scrollback=false")
+	var exitErr *exitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("err = %v", err)
+	}
+	if viper.GetString("log-level") != "warn" || viper.GetBool("no-history") || viper.GetBool("clear-scrollback") {
+		t.Fatalf("log-level %q no-history %v clear-scrollback %v", viper.GetString("log-level"), viper.GetBool("no-history"), viper.GetBool("clear-scrollback"))
+	}
+}
+
 func TestClearScrollbackDefaultsOff(t *testing.T) {
 	prepare(t)
 	cmd, err := newRootCmd()
@@ -349,8 +398,8 @@ func TestConnectListsKeyProviders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := `
-model: ollama/test-model
+	settings := "model: ollama/test-model\n"
+	models := `
 providers:
   ollama:
     base_url: http://127.0.0.1:11434
@@ -368,13 +417,8 @@ providers:
     models:
       - qwen/qwen3-coder
 `
-	path := provider.HomeConfig(home)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeHomeFile(t, provider.HomeConfig(home), settings)
+	writeHomeFile(t, provider.HomeModels(home), models)
 
 	stdout, stderr, err := startCLI(t, "/connect\nexit\n", "--no-history")
 	if err != nil {
@@ -545,15 +589,7 @@ func TestExitPrintsResumeAndContinueKeepsTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`model: "ollama/other"
-providers:
-  ollama:
-    base_url: %q
-    auth: none
-    models:
-      - test-model
-`, server.URL)
-	if err := os.WriteFile(provider.HomeConfig(home), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(provider.HomeConfig(home), []byte("model: \"ollama/other\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, stderr, err = startCLI(
@@ -643,22 +679,21 @@ func TestOllamaUsesTheRunningModel(t *testing.T) {
 	if strings.Contains(stderr, "Which model?") {
 		t.Fatalf("asked despite a running model: %q", stderr)
 	}
-	text := readHomeConfig(t)
-	modelAt := strings.Index(text, "model:")
-	providersAt := strings.Index(text, "providers:")
-	if modelAt < 0 || providersAt < modelAt || !strings.Contains(text, `model: "ollama/b"`) {
-		t.Fatalf("config:\n%s", text)
+	configText := readHomeConfig(t)
+	if strings.Contains(configText, "providers:") || !strings.Contains(configText, `model: "ollama/b"`) {
+		t.Fatalf("config:\n%s", configText)
 	}
-	if !strings.Contains(text, server.URL) || !strings.Contains(text, "auth: none") {
-		t.Fatalf("config:\n%s", text)
+	modelsText := readHomeModels(t)
+	if strings.Contains(modelsText, "model:") || !strings.Contains(modelsText, server.URL) || !strings.Contains(modelsText, "auth: none") {
+		t.Fatalf("models:\n%s", modelsText)
 	}
-	if !strings.Contains(text, "reasoning_effort: true") || !strings.Contains(text, "reasoning_delta: true") {
-		t.Fatalf("config:\n%s", text)
+	if !strings.Contains(modelsText, "reasoning_effort: true") || !strings.Contains(modelsText, "reasoning_delta: true") {
+		t.Fatalf("models:\n%s", modelsText)
 	}
-	a := strings.Index(text, `"a"`)
-	b := strings.Index(text, `"b"`)
+	a := strings.Index(modelsText, `"a"`)
+	b := strings.Index(modelsText, `"b"`)
 	if a < 0 || b < a {
-		t.Fatalf("config:\n%s", text)
+		t.Fatalf("models:\n%s", modelsText)
 	}
 }
 
@@ -681,10 +716,11 @@ func TestOllamaRefreshKeepsCompatAndUsesRunningModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := provider.HomeConfig(home)
-	body := `model: "openrouter/keep"
+	writeHomeFile(t, provider.HomeConfig(home), `model: "openrouter/keep"
 log-level: debug
-providers:
+clear-scrollback: true
+`)
+	writeHomeFile(t, provider.HomeModels(home), `providers:
   ollama:
     base_url: http://old.example:11434
     auth: none
@@ -693,13 +729,7 @@ providers:
     compat:
       reasoning_effort: false
       reasoning_delta: false
-`
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
+`)
 
 	stdout, _, err := startCLI(t, "", "ollama", "--host", server.URL+"/")
 	if err != nil {
@@ -708,25 +738,24 @@ providers:
 	if stdout != "model: ollama/qwen3:8b\n" {
 		t.Fatalf("stdout %q", stdout)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	configText := readHomeConfig(t)
+	modelAt := strings.Index(configText, "model:")
+	logAt := strings.Index(configText, "log-level:")
+	if modelAt < 0 || logAt < modelAt {
+		t.Fatalf("config:\n%s", configText)
 	}
-	text := string(data)
-	modelAt := strings.Index(text, "model:")
-	providersAt := strings.Index(text, "providers:")
-	logAt := strings.Index(text, "log-level:")
-	if modelAt < 0 || providersAt < modelAt || logAt < providersAt {
-		t.Fatalf("config:\n%s", text)
+	if !strings.Contains(configText, `model: "ollama/qwen3:8b"`) || !strings.Contains(configText, "log-level: debug") {
+		t.Fatalf("config:\n%s", configText)
 	}
-	if !strings.Contains(text, `model: "ollama/qwen3:8b"`) || strings.Contains(text, "old.example") {
-		t.Fatalf("config:\n%s", text)
+	if !strings.Contains(configText, "clear-scrollback: true") || strings.Contains(configText, "providers:") || strings.Contains(configText, "old.example") {
+		t.Fatalf("config:\n%s", configText)
 	}
-	if strings.Contains(text, "reasoning_effort: true") || !strings.Contains(text, server.URL) {
-		t.Fatalf("config:\n%s", text)
+	modelsText := readHomeModels(t)
+	if strings.Contains(modelsText, "model:") || strings.Contains(modelsText, "old.example") || strings.Contains(modelsText, "reasoning_effort: true") {
+		t.Fatalf("models:\n%s", modelsText)
 	}
-	if !strings.Contains(text, `"qwen3:8b"`) || !strings.Contains(text, "log-level: debug") {
-		t.Fatalf("config:\n%s", text)
+	if !strings.Contains(modelsText, server.URL) || !strings.Contains(modelsText, `"qwen3:8b"`) {
+		t.Fatalf("models:\n%s", modelsText)
 	}
 }
 
@@ -746,6 +775,9 @@ func TestOllamaNotInstalledWritesNothing(t *testing.T) {
 	}
 	if _, statErr := os.Stat(provider.HomeConfig(home)); !os.IsNotExist(statErr) {
 		t.Fatal("config was written")
+	}
+	if _, statErr := os.Stat(provider.HomeModels(home)); !os.IsNotExist(statErr) {
+		t.Fatal("models were written")
 	}
 }
 
@@ -858,16 +890,11 @@ func TestOllamaHostFromEnv(t *testing.T) {
 	if _, _, err := startCLI(t, "", "ollama"); err != nil {
 		t.Fatal(err)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(readHomeConfig(t), `model: "ollama/local"`) {
+		t.Fatalf("config:\n%s", readHomeConfig(t))
 	}
-	data, err := os.ReadFile(provider.HomeConfig(home))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), server.URL) || !strings.Contains(string(data), `model: "ollama/local"`) {
-		t.Fatalf("config:\n%s", data)
+	if !strings.Contains(readHomeModels(t), server.URL) {
+		t.Fatalf("models:\n%s", readHomeModels(t))
 	}
 }
 
@@ -898,15 +925,35 @@ func useInstalledOllama(t *testing.T) {
 
 func readHomeConfig(t *testing.T) string {
 	t.Helper()
+	return readHomeFile(t, provider.HomeConfig)
+}
+
+func readHomeModels(t *testing.T) string {
+	t.Helper()
+	return readHomeFile(t, provider.HomeModels)
+}
+
+func readHomeFile(t *testing.T, pathFn func(string) string) string {
+	t.Helper()
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(provider.HomeConfig(home))
+	data, err := os.ReadFile(pathFn(home))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func writeHomeFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func writeOllamaConfig(t *testing.T, baseURL string, models ...string) {
@@ -915,21 +962,17 @@ func writeOllamaConfig(t *testing.T, baseURL string, models ...string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var body strings.Builder
+	var settings strings.Builder
 	if len(models) > 0 {
-		fmt.Fprintf(&body, "model: %q\n", "ollama/"+models[0])
+		fmt.Fprintf(&settings, "model: %q\n", "ollama/"+models[0])
 	}
-	fmt.Fprintf(&body, "providers:\n  ollama:\n    base_url: %q\n    auth: none\n    models:\n", baseURL)
+	var catalog strings.Builder
+	fmt.Fprintf(&catalog, "providers:\n  ollama:\n    base_url: %q\n    auth: none\n    models:\n", baseURL)
 	for _, model := range models {
-		fmt.Fprintf(&body, "      - %q\n", model)
+		fmt.Fprintf(&catalog, "      - %q\n", model)
 	}
-	path := provider.HomeConfig(home)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(body.String()), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeHomeFile(t, provider.HomeConfig(home), settings.String())
+	writeHomeFile(t, provider.HomeModels(home), catalog.String())
 }
 
 func resumeHint(t *testing.T, stderr string) string {

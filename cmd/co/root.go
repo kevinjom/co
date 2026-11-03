@@ -121,6 +121,9 @@ func initConfig(cmd *cobra.Command) error {
 			return fmt.Errorf("reading config: %w", err)
 		}
 	}
+	// resume is a one-shot flag. A value in the settings file would reopen
+	// the same session on every launch.
+	ignoreConfigResume(cmd)
 
 	level, err := parseLogLevel(viper.GetString("log-level"))
 	if err != nil {
@@ -132,6 +135,7 @@ func initConfig(cmd *cobra.Command) error {
 }
 
 // setDefaultConfig prefers ~/.co/config.yaml and otherwise uses ./.co.yaml.
+// That file holds the default model, log-level, no-history, and clear-scrollback.
 func setDefaultConfig(home string) error {
 	candidates := []string{
 		provider.HomeConfig(home),
@@ -152,6 +156,17 @@ func setDefaultConfig(home string) error {
 		return nil
 	}
 	return nil
+}
+
+func ignoreConfigResume(cmd *cobra.Command) {
+	if strings.TrimSpace(os.Getenv("CO_RESUME")) != "" {
+		return
+	}
+	flag := cmd.Root().Flags().Lookup("resume")
+	if flag != nil && flag.Changed {
+		return
+	}
+	viper.Set("resume", "")
 }
 
 func parseLogLevel(raw string) (slog.Level, error) {

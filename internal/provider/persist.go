@@ -32,9 +32,9 @@ func saveModelKey(path, model string) error {
 	return writeDoc(path, doc, mode)
 }
 
-// ProviderSpec is one provider block stored in a config file.
+// ProviderSpec is one provider block stored in a models file.
 // CompatOnCreate is written only when that provider is new.
-// Model replaces the model key. DefaultModel fills it only when empty.
+// Model replaces the model key in the config file. DefaultModel fills it only when empty.
 type ProviderSpec struct {
 	ID             string
 	BaseURL        string
@@ -45,8 +45,10 @@ type ProviderSpec struct {
 	DefaultModel   string
 }
 
-// WriteProvider upserts one provider and keeps model above providers.
-func WriteProvider(path string, spec ProviderSpec) error {
+// WriteProvider upserts one provider in modelsPath.
+// The model key is written to configPath. Passing one path for both keeps
+// model above providers in that file, which is how --config stays a single file.
+func WriteProvider(configPath, modelsPath string, spec ProviderSpec) error {
 	if err := validProviderID(spec.ID); err != nil {
 		return err
 	}
@@ -54,6 +56,16 @@ func WriteProvider(path string, spec ProviderSpec) error {
 	if base == "" {
 		return fmt.Errorf("provider %q: base_url is required", spec.ID)
 	}
+	if configPath == modelsPath {
+		return upsertProviderFile(configPath, spec, base, true)
+	}
+	if err := upsertProviderFile(modelsPath, spec, base, false); err != nil {
+		return err
+	}
+	return applyModel(configPath, spec)
+}
+
+func upsertProviderFile(path string, spec ProviderSpec, base string, withModel bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("writing config %s: %w", path, err)
 	}
@@ -68,18 +80,59 @@ func WriteProvider(path string, spec ProviderSpec) error {
 	if err := upsertProvider(root, spec, base); err != nil {
 		return err
 	}
-	switch {
-	case spec.Model != "":
-		if err := setModel(doc, spec.Model); err != nil {
-			return err
-		}
-	case spec.DefaultModel != "" && modelBlank(root):
-		if err := setModel(doc, spec.DefaultModel); err != nil {
+	if withModel {
+		if _, err := applyModelNode(doc, spec); err != nil {
 			return err
 		}
 	}
 	orderRoot(root)
 	return writeDoc(path, doc, mode)
+}
+
+// applyModel writes Model, or DefaultModel when the key is empty.
+// A DefaultModel that loses to an existing model leaves the file untouched.
+func applyModel(path string, spec ProviderSpec) error {
+	if spec.Model == "" && spec.DefaultModel == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("writing config %s: %w", path, err)
+	}
+	doc, mode, err := loadYAML(path)
+	if err != nil {
+		return err
+	}
+	root, err := mappingRoot(doc)
+	if err != nil {
+		return err
+	}
+	wrote, err := applyModelNode(doc, spec)
+	if err != nil || !wrote {
+		return err
+	}
+	orderRoot(root)
+	return writeDoc(path, doc, mode)
+}
+
+func applyModelNode(doc *yaml.Node, spec ProviderSpec) (bool, error) {
+	root, err := mappingRoot(doc)
+	if err != nil {
+		return false, err
+	}
+	switch {
+	case spec.Model != "":
+		if err := setModel(doc, spec.Model); err != nil {
+			return false, err
+		}
+		return true, nil
+	case spec.DefaultModel != "" && modelBlank(root):
+		if err := setModel(doc, spec.DefaultModel); err != nil {
+			return false, err
+		}
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 func writeDoc(path string, doc *yaml.Node, mode os.FileMode) error {

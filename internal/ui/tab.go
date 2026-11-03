@@ -49,7 +49,7 @@ type tab struct {
 	title         string
 	turnID        int
 	cancel        context.CancelFunc
-	events        <-chan tea.Msg
+	pipe          *turnPipe
 	draft         string
 	offset        int
 	follow        bool

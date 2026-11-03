@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -140,7 +143,7 @@ func TestTurnMessagesAppendInOrder(t *testing.T) {
 	m := newTestModel(t)
 	m.tab().turnID = 1
 	m.tab().busy = true
-	m.tab().events = make(chan tea.Msg)
+	m.tab().pipe = newTurnPipe()
 	_, cmd := m.Update(eventMsg{tabID: 1, id: 1, event: agent.ToolStart{ID: "call_1", Name: "list_dir", Detail: "path=."}})
 	if cmd == nil {
 		t.Fatal("expected to keep listening")
@@ -163,7 +166,6 @@ func TestReasoningStreamsBeforeTheAnswer(t *testing.T) {
 	m := newTestModel(t)
 	m.tab().turnID = 1
 	m.tab().busy = true
-	m.tab().events = make(chan tea.Msg)
 	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ReasoningDelta{Text: "Think"}})
 	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ReasoningDelta{Text: "ing"}})
 	m.Update(eventMsg{tabID: 1, id: 1, event: agent.AnswerDelta{Text: "Hi"}})
@@ -183,7 +185,6 @@ func TestReasoningOnlyAnswerIsNotDuplicated(t *testing.T) {
 	m := newTestModel(t)
 	m.tab().turnID = 1
 	m.tab().busy = true
-	m.tab().events = make(chan tea.Msg)
 	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ReasoningDelta{Text: "the answer"}})
 	updated, _ := m.Update(turnDoneMsg{tabID: 1, id: 1, answer: "the answer"})
 	got := updated.(*model)
@@ -196,7 +197,6 @@ func TestAnswerDeltasGrowOneBlock(t *testing.T) {
 	m := newTestModel(t)
 	m.tab().turnID = 1
 	m.tab().busy = true
-	m.tab().events = make(chan tea.Msg)
 	m.Update(eventMsg{tabID: 1, id: 1, event: agent.AnswerDelta{Text: "hel"}})
 	m.Update(eventMsg{tabID: 1, id: 1, event: agent.AnswerDelta{Text: "lo"}})
 	if len(m.tab().blocks) != 1 || m.tab().blocks[0].kind != blockAssistant || m.tab().blocks[0].text != "hello" {
@@ -211,7 +211,6 @@ func TestToolErrorMarksTheLine(t *testing.T) {
 	m := newTestModel(t)
 	m.tab().turnID = 1
 	m.tab().busy = true
-	m.tab().events = make(chan tea.Msg)
 	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ToolStart{ID: "call_1", Name: "read_file", Detail: "path=missing"}})
 	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ToolDone{ID: "call_1", Err: errors.New("missing")}})
 	if len(m.tab().blocks) != 1 || !m.tab().blocks[0].failed || !m.tab().blocks[0].done {
@@ -227,7 +226,6 @@ func TestCtrlCKeepsPartialAnswer(t *testing.T) {
 	m := newTestModel(t)
 	m.tab().turnID = 1
 	m.tab().busy = true
-	m.tab().events = make(chan tea.Msg)
 	canceled := false
 	m.tab().cancel = func() { canceled = true }
 	m.Update(eventMsg{tabID: 1, id: 1, event: agent.AnswerDelta{Text: "partial answer"}})
@@ -750,7 +748,6 @@ func TestBackgroundTurnLeavesTheVisibleTranscript(t *testing.T) {
 	back.busy = true
 	back.state = statusWorking
 	back.turnID = 1
-	back.events = make(chan tea.Msg)
 	before := ansi.Strip(m.renderTranscript())
 	m.Update(eventMsg{tabID: 2, id: 1, event: agent.AnswerDelta{Text: "hidden"}})
 	if ansi.Strip(m.renderTranscript()) != before {
@@ -906,7 +903,6 @@ func TestFinishedTurnSendsTheQueue(t *testing.T) {
 	m := newTestModel(t)
 	m.tab().turnID = 1
 	m.tab().busy = true
-	m.tab().events = make(chan tea.Msg)
 	m.tab().queue = []string{"one", "two"}
 	updated, cmd := m.Update(turnDoneMsg{tabID: 1, id: 1, answer: "done"})
 	got := updated.(*model)
@@ -993,4 +989,201 @@ func TestQueueBelongsToTheSession(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.View().Content), "· only mine") {
 		t.Fatal("queue lost")
 	}
+}
+
+func TestCoalesceKeepsToolBoundaries(t *testing.T) {
+	pending := coalesceTurn(nil, eventMsg{id: 1, event: agent.AnswerDelta{Text: "a"}})
+	pending = coalesceTurn(pending, eventMsg{id: 1, event: agent.AnswerDelta{Text: "b"}})
+	pending = coalesceTurn(pending, eventMsg{id: 1, event: agent.ToolStart{ID: "1", Name: "list_dir"}})
+	pending = coalesceTurn(pending, eventMsg{id: 1, event: agent.AnswerDelta{Text: "c"}})
+	if len(pending) != 3 {
+		t.Fatalf("len %d", len(pending))
+	}
+	got, ok := pending[0].(eventMsg)
+	if !ok {
+		t.Fatalf("first %T", pending[0])
+	}
+	delta, ok := got.event.(agent.AnswerDelta)
+	if !ok || delta.Text != "ab" {
+		t.Fatalf("delta %#v", got.event)
+	}
+}
+
+func TestFocusedStreamPaintsBeforeTheTurnEnds(t *testing.T) {
+	m := newTestModel(t)
+	gate := &gateChat{entered: make(chan struct{}), release: make(chan struct{})}
+	var once sync.Once
+	release := func() { once.Do(func() { close(gate.release) }) }
+	defer release()
+	m.tab().session = agent.NewSession(gate, "test-model", m.cwd, nil)
+	cmd := m.startTurn(m.tab(), []string{"q"})
+	select {
+	case <-gate.entered:
+	case <-time.After(time.Second):
+		t.Fatal("stream did not start")
+	}
+	updated, cmd := m.Update(awaitMsg(t, cmd))
+	got := updated.(*model)
+	plain := ansi.Strip(got.renderTranscript())
+	if !strings.Contains(plain, "hel") || strings.Contains(plain, "hello") || !got.tab().busy || got.tab().activity != "answering" {
+		t.Fatalf("busy %v activity %q transcript %q", got.tab().busy, got.tab().activity, plain)
+	}
+	release()
+	updated, _ = got.Update(awaitMsg(t, cmd))
+	got = updated.(*model)
+	plain = ansi.Strip(got.renderTranscript())
+	if got.tab().busy || got.tab().state != statusDone || !strings.Contains(plain, "hello") {
+		t.Fatalf("busy %v state %v transcript %q", got.tab().busy, got.tab().state, plain)
+	}
+	answers := 0
+	for _, block := range got.tab().blocks {
+		if block.kind == blockAssistant {
+			answers++
+			if block.text != "hello" {
+				t.Fatalf("answer %q", block.text)
+			}
+		}
+	}
+	if answers != 1 {
+		t.Fatalf("assistant blocks %d", answers)
+	}
+}
+
+func TestBackgroundStreamIsNotHeld(t *testing.T) {
+	const chunks = 1000
+	flood := &floodChat{n: chunks, done: make(chan struct{})}
+	m := newTestModel(t)
+	m.tab().blocks = []block{{kind: blockUser, text: "visible"}}
+	m.tabs = append(m.tabs, newTab(2, agent.NewSession(flood, "test-model", m.cwd, nil)))
+	cmd := m.startTurn(&m.tabs[1], []string{"hi"})
+	select {
+	case <-flood.done:
+	case <-time.After(time.Second):
+		t.Fatal("background stream blocked on the UI")
+	}
+	if strings.Contains(ansi.Strip(m.renderTranscript()), "xxx") {
+		t.Fatal("visible transcript changed while the other session streamed")
+	}
+
+	got := m
+	deadline := time.Now().Add(time.Second)
+	for got.tabs[1].state != statusDone {
+		if time.Now().After(deadline) {
+			t.Fatalf("state %v", got.tabs[1].state)
+		}
+		updated, next := got.Update(awaitMsg(t, cmd))
+		got = updated.(*model)
+		cmd = next
+	}
+	if got.focus != 0 {
+		t.Fatalf("focus %d", got.focus)
+	}
+	plain := ansi.Strip(got.renderTranscript())
+	if !strings.Contains(plain, "visible") || strings.Contains(plain, "xxx") {
+		t.Fatalf("transcript %q", plain)
+	}
+	answers := 0
+	for _, block := range got.tabs[1].blocks {
+		if block.kind != blockAssistant {
+			continue
+		}
+		answers++
+		if block.text != strings.Repeat("x", chunks) {
+			t.Fatalf("answer length %d", len(block.text))
+		}
+	}
+	if answers != 1 {
+		t.Fatalf("assistant blocks %d", answers)
+	}
+	panel := ansi.Strip(got.sessionPanel())
+	if !strings.Contains(panel, "●") || !strings.Contains(panel, "○") {
+		t.Fatalf("panel %q", panel)
+	}
+}
+
+func awaitMsg(t *testing.T, cmd tea.Cmd) tea.Msg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("nil cmd")
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return msg
+	}
+	ch := make(chan tea.Msg, len(batch))
+	for _, item := range batch {
+		go func() {
+			if item == nil {
+				ch <- nil
+				return
+			}
+			ch <- item()
+		}()
+	}
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	pending := len(batch)
+	for pending > 0 {
+		select {
+		case got := <-ch:
+			pending--
+			if _, tick := got.(spinner.TickMsg); tick || got == nil {
+				continue
+			}
+			if _, wake := got.(pipeMsg); wake {
+				return got
+			}
+		case <-timer.C:
+			t.Fatal("timed out waiting for the turn")
+		}
+	}
+	t.Fatal("turn produced no event")
+	return nil
+}
+
+type floodChat struct {
+	n    int
+	done chan struct{}
+}
+
+func (f *floodChat) ChatStream(
+	_ context.Context,
+	_ string,
+	_ []openai.Message,
+	_ []openai.Tool,
+	onChunk func(openai.StreamKind, string),
+) (openai.Message, error) {
+	var b strings.Builder
+	for range f.n {
+		if onChunk != nil {
+			onChunk(openai.StreamContent, "x")
+		}
+		b.WriteString("x")
+	}
+	close(f.done)
+	return openai.Message{Role: "assistant", Content: b.String()}, nil
+}
+
+type gateChat struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (g *gateChat) ChatStream(
+	_ context.Context,
+	_ string,
+	_ []openai.Message,
+	_ []openai.Tool,
+	onChunk func(openai.StreamKind, string),
+) (openai.Message, error) {
+	if onChunk != nil {
+		onChunk(openai.StreamContent, "hel")
+	}
+	close(g.entered)
+	<-g.release
+	if onChunk != nil {
+		onChunk(openai.StreamContent, "lo")
+	}
+	return openai.Message{Role: "assistant", Content: "hello"}, nil
 }

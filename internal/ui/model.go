@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -22,10 +23,7 @@ import (
 	"github.com/kevinjom/co/internal/command"
 )
 
-const (
-	paintGap    = time.Second / 30
-	eventBuffer = 256
-)
+const paintGap = time.Second / 30
 
 type blockKind int
 
@@ -286,6 +284,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		return m, m.onEvents(msg)
 
+	case pipeMsg:
+		return m, m.onPipe(msg)
+
 	case paintMsg:
 		m.paintWaiting = false
 		if m.dirty {
@@ -512,20 +513,19 @@ func (m *model) startTurn(item *tab, lines []string) tea.Cmd {
 	item.cancel = cancel
 
 	sent := append([]string{}, lines...)
-	ch := make(chan tea.Msg, eventBuffer)
+	pipe := newTurnPipe()
+	item.pipe = pipe
 	session := item.session
 	go func() {
-		defer close(ch)
 		answer, err := session.Reply(ctx, sent, func(ev agent.Event) {
-			ch <- eventMsg{tabID: tabID, id: turn, event: ev}
+			pipe.push(eventMsg{tabID: tabID, id: turn, event: ev})
 		})
-		ch <- turnDoneMsg{tabID: tabID, id: turn, answer: answer, err: err}
+		pipe.push(turnDoneMsg{tabID: tabID, id: turn, answer: answer, err: err})
 	}()
-	item.events = ch
 	if spinning {
-		return waitEvent(ch)
+		return waitPipe(pipe)
 	}
-	return tea.Batch(waitEvent(ch), m.spin.Tick)
+	return tea.Batch(waitPipe(pipe), m.spin.Tick)
 }
 
 // drainQueue starts one follow-up turn for every line still waiting on this session.
@@ -603,10 +603,7 @@ func (m *model) finishTurn(msg turnDoneMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if msg.id != item.turnID {
-		if item.busy {
-			return m, waitEvent(item.events)
-		}
-		return m, nil
+		return m, m.listen(item)
 	}
 	m.stopTurn(item)
 	if m.ctx.Err() != nil {
@@ -653,43 +650,56 @@ func (m *model) onEvents(msg eventMsg) tea.Cmd {
 	if item == nil {
 		return nil
 	}
-	if !m.applyEvent(item, msg) {
-		if item.busy {
-			return waitEvent(item.events)
-		}
-		return nil
-	}
-	focused := item.id == m.tab().id
-	for {
-		select {
-		case next, ok := <-item.events:
-			if !ok {
-				if focused {
-					m.paint()
-				}
-				return nil
-			}
-			switch next := next.(type) {
-			case eventMsg:
-				m.applyEvent(item, next)
-			case turnDoneMsg:
-				_, cmd := m.finishTurn(next)
-				return cmd
-			default:
-				panic(fmt.Sprintf("unhandled turn message %T", next))
-			}
-		default:
-			if !focused {
-				return waitEvent(item.events)
-			}
-			return tea.Batch(m.schedulePaint(), waitEvent(item.events))
-		}
-	}
+	m.applyEvent(item, msg)
+	return m.listen(item)
 }
 
-func (m *model) applyEvent(item *tab, msg eventMsg) bool {
+func (m *model) onPipe(msg pipeMsg) tea.Cmd {
+	item := m.tabByPipe(msg.pipe)
+	if item == nil {
+		return nil
+	}
+	for _, next := range msg.pipe.drain() {
+		switch next := next.(type) {
+		case eventMsg:
+			m.applyEvent(item, next)
+		case turnDoneMsg:
+			_, cmd := m.finishTurn(next)
+			return cmd
+		default:
+			panic(fmt.Sprintf("unhandled turn message %T", next))
+		}
+	}
+	return m.listen(item)
+}
+
+func (m *model) tabByPipe(pipe *turnPipe) *tab {
+	if pipe == nil {
+		return nil
+	}
+	for i := range m.tabs {
+		if m.tabs[i].pipe == pipe {
+			return &m.tabs[i]
+		}
+	}
+	return nil
+}
+
+// listen waits for the next event on a turn that is still running.
+// A background turn stays subscribed, so its stream is applied without focus.
+func (m *model) listen(item *tab) tea.Cmd {
+	if item == nil || !item.busy || item.pipe == nil {
+		return nil
+	}
+	if item.id == m.tab().id {
+		return tea.Batch(m.schedulePaint(), waitPipe(item.pipe))
+	}
+	return waitPipe(item.pipe)
+}
+
+func (m *model) applyEvent(item *tab, msg eventMsg) {
 	if msg.id != item.turnID {
-		return false
+		return
 	}
 	switch ev := msg.event.(type) {
 	case agent.ReasoningDelta:
@@ -714,7 +724,6 @@ func (m *model) applyEvent(item *tab, msg eventMsg) bool {
 	if item.id == m.tab().id {
 		m.dirty = true
 	}
-	return true
 }
 
 func (m *model) appendAnswer(item *tab, text string) {
@@ -975,13 +984,79 @@ func (m *model) programStatus() *tea.ProgramStatus {
 	}
 }
 
-func waitEvent(ch <-chan tea.Msg) tea.Cmd {
-	return func() tea.Msg {
-		msg, ok := <-ch
+// turnPipe is one turn's queue into the UI.
+// push does not block, so a session off screen keeps reading the model
+// instead of waiting for this loop to draw the focused transcript.
+type turnPipe struct {
+	mu      sync.Mutex
+	pending []tea.Msg
+	wake    chan struct{}
+}
+
+func newTurnPipe() *turnPipe {
+	return &turnPipe{
+		pending: []tea.Msg{},
+		wake:    make(chan struct{}, 1),
+	}
+}
+
+type pipeMsg struct {
+	pipe *turnPipe
+}
+
+func (p *turnPipe) push(msg tea.Msg) {
+	p.mu.Lock()
+	p.pending = coalesceTurn(p.pending, msg)
+	p.mu.Unlock()
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (p *turnPipe) drain() []tea.Msg {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := p.pending
+	p.pending = []tea.Msg{}
+	return out
+}
+
+func coalesceTurn(pending []tea.Msg, msg tea.Msg) []tea.Msg {
+	next, ok := msg.(eventMsg)
+	if !ok || len(pending) == 0 {
+		return append(pending, msg)
+	}
+	last, ok := pending[len(pending)-1].(eventMsg)
+	if !ok || last.tabID != next.tabID || last.id != next.id {
+		return append(pending, msg)
+	}
+	switch ev := next.event.(type) {
+	case agent.AnswerDelta:
+		prev, ok := last.event.(agent.AnswerDelta)
 		if !ok {
-			return nil
+			return append(pending, msg)
 		}
-		return msg
+		prev.Text += ev.Text
+		last.event = prev
+	case agent.ReasoningDelta:
+		prev, ok := last.event.(agent.ReasoningDelta)
+		if !ok {
+			return append(pending, msg)
+		}
+		prev.Text += ev.Text
+		last.event = prev
+	default:
+		return append(pending, msg)
+	}
+	pending[len(pending)-1] = last
+	return pending
+}
+
+func waitPipe(p *turnPipe) tea.Cmd {
+	return func() tea.Msg {
+		<-p.wake
+		return pipeMsg{pipe: p}
 	}
 }
 

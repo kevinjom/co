@@ -53,9 +53,10 @@ model: openrouter/qwen/qwen3-coder
 log-level: info
 no-history: false
 clear-scrollback: false
+max-tool-rounds: 64
 ```
 
-`log-level` is `debug`, `info`, `warn`, or `error`. `no-history` skips the transcript. `clear-scrollback` erases the terminal scrollback before the TUI starts. A flag or its environment variable wins over the file. `resume` is not read from the file.
+`log-level` is `debug`, `info`, `warn`, or `error`. `no-history` skips the transcript. `clear-scrollback` erases the terminal scrollback before the TUI starts. `max-tool-rounds` is how many model calls in a turn may include tools. After that many, one more call is made with no tools. The default is 64. A flag or its environment variable wins over the file. `resume` is not read from the file.
 
 `~/.co/models.yaml` is the provider catalog:
 
@@ -91,7 +92,7 @@ providers:
 | `model` in `./.co.yaml` | Default model when the home file has none. |
 | `providers` in `~/.co/models.yaml` | Home providers. |
 | `providers` in `./.co.yaml` | Replaces the home provider with the same id. Other home providers stay. |
-| `log-level`, `no-history`, `clear-scrollback` in `~/.co/config.yaml` | Defaults for those flags. |
+| `log-level`, `no-history`, `clear-scrollback`, `max-tool-rounds` in `~/.co/config.yaml` | Defaults for those flags. |
 
 `--config path` uses that file alone for flags, providers, and the default model. It does not read `~/.co/config.yaml`, `~/.co/models.yaml`, or `./.co.yaml`, and `/models` does not write the home file. Keys still come from the environment and `~/.co/credentials.json`.
 
@@ -127,6 +128,7 @@ With no model selected, a terminal opens the model picker. Anything else exits a
 | `--resume` | `CO_RESUME` | | A session id, or `latest` for the newest session in this directory. Not read from the file. |
 | `--no-history` | `CO_NO_HISTORY` | `no-history` | Do not write the transcript. |
 | `--clear-scrollback` | `CO_CLEAR_SCROLLBACK` | `clear-scrollback` | Erase the terminal scrollback before the TUI starts. Off unless set. |
+| `--max-tool-rounds` | `CO_MAX_TOOL_ROUNDS` | `max-tool-rounds` | Model calls that may include tools. Default 64. The next call has no tools. |
 
 `CO_` is the environment prefix, and `-` in a flag name becomes `_`.
 

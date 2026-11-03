@@ -37,7 +37,13 @@ providers:
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := New(cat, home, cwd, false)
+	app := New(
+		cat,
+		home,
+		cwd,
+		false,
+		0,
+	)
 	ctx := context.Background()
 	if _, err := app.Open(ctx); err == nil {
 		t.Fatal("opened a session before a model was selected")

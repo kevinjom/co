@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kevinjom/co/internal/config"
 	"github.com/kevinjom/co/internal/openai"
 	"github.com/kevinjom/co/internal/tools"
 )
@@ -31,22 +32,19 @@ type Chatter interface {
 
 var _ Chatter = (*openai.Client)(nil)
 
-// maxToolRounds is how many model calls may include tools.
-// If the model is still calling tools after that, one more call is made with no tools.
-const maxToolRounds = 8
-
 // Session is one in-memory conversation.
 type Session struct {
-	client   Chatter
-	model    string
-	tools    *tools.Set
-	defs     []openai.Tool
-	messages []openai.Message
-	recorder Recorder
-	titleWG  sync.WaitGroup
-	titleMu  sync.Mutex
-	title    string
-	onTitle  func(string)
+	client        Chatter
+	model         string
+	tools         *tools.Set
+	defs          []openai.Tool
+	messages      []openai.Message
+	recorder      Recorder
+	maxToolRounds int
+	titleWG       sync.WaitGroup
+	titleMu       sync.Mutex
+	title         string
+	onTitle       func(string)
 }
 
 // NewSession starts a conversation rooted at cwd.
@@ -54,15 +52,25 @@ type Session struct {
 func NewSession(client Chatter, model, cwd string, recorder Recorder) *Session {
 	set := tools.New(cwd)
 	return &Session{
-		client:   client,
-		model:    model,
-		tools:    set,
-		defs:     toolDefinitions(set),
-		recorder: recorder,
+		client:        client,
+		model:         model,
+		tools:         set,
+		defs:          toolDefinitions(set),
+		recorder:      recorder,
+		maxToolRounds: config.DefaultMaxToolRounds,
 		messages: []openai.Message{
 			{Role: "system", Content: systemPrompt(cwd)},
 		},
 	}
+}
+
+// SetMaxToolRounds sets how many model calls in a turn may include tools.
+// A value below 1 is ignored.
+func (s *Session) SetMaxToolRounds(n int) {
+	if n < 1 {
+		return
+	}
+	s.maxToolRounds = n
 }
 
 // SetModel points later turns at a different endpoint and wire model id.
@@ -109,7 +117,7 @@ func (s *Session) Turn(ctx context.Context, userText string, observe Observer) (
 }
 
 func (s *Session) converse(ctx context.Context, observe Observer) (string, error) {
-	for range maxToolRounds {
+	for range s.maxToolRounds {
 		msg, err := s.complete(ctx, s.defs, observe)
 		if err != nil {
 			return s.keepPartial(msg, err)

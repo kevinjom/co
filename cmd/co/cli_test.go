@@ -69,6 +69,7 @@ func prepare(t *testing.T) {
 	t.Setenv("CO_LOG_LEVEL", "")
 	t.Setenv("CO_NO_HISTORY", "")
 	t.Setenv("CO_CLEAR_SCROLLBACK", "")
+	t.Setenv("CO_MAX_TOOL_ROUNDS", "")
 	t.Setenv("CO_RESUME", "")
 	t.Setenv("CO_LIMIT", "")
 	t.Chdir(t.TempDir())
@@ -103,6 +104,7 @@ func TestConfigFileSetsSupportedFlags(t *testing.T) {
 log-level: debug
 no-history: true
 clear-scrollback: true
+max-tool-rounds: 8
 resume: latest
 `)
 
@@ -115,6 +117,9 @@ resume: latest
 	if !viper.GetBool("no-history") || !viper.GetBool("clear-scrollback") {
 		t.Fatalf("no-history %v clear-scrollback %v", viper.GetBool("no-history"), viper.GetBool("clear-scrollback"))
 	}
+	if viper.GetInt("max-tool-rounds") != 8 {
+		t.Fatalf("max-tool-rounds %d", viper.GetInt("max-tool-rounds"))
+	}
 	if viper.GetString("resume") != "" {
 		t.Fatalf("resume from config %q", viper.GetString("resume"))
 	}
@@ -122,23 +127,31 @@ resume: latest
 	t.Setenv("CO_LOG_LEVEL", "error")
 	t.Setenv("CO_NO_HISTORY", "false")
 	t.Setenv("CO_CLEAR_SCROLLBACK", "false")
+	t.Setenv("CO_MAX_TOOL_ROUNDS", "3")
 	if _, _, err := startCLI(t, "", "version"); err != nil {
 		t.Fatal(err)
 	}
 	if viper.GetString("log-level") != "error" || viper.GetBool("no-history") || viper.GetBool("clear-scrollback") {
 		t.Fatalf("log-level %q no-history %v clear-scrollback %v", viper.GetString("log-level"), viper.GetBool("no-history"), viper.GetBool("clear-scrollback"))
 	}
+	if viper.GetInt("max-tool-rounds") != 3 {
+		t.Fatalf("max-tool-rounds %d", viper.GetInt("max-tool-rounds"))
+	}
 
 	t.Setenv("CO_LOG_LEVEL", "")
 	t.Setenv("CO_NO_HISTORY", "")
 	t.Setenv("CO_CLEAR_SCROLLBACK", "")
-	_, _, err = startCLI(t, "", "--log-level", "warn", "--no-history=false", "--clear-scrollback=false")
+	t.Setenv("CO_MAX_TOOL_ROUNDS", "")
+	_, _, err = startCLI(t, "", "--log-level", "warn", "--no-history=false", "--clear-scrollback=false", "--max-tool-rounds=4")
 	var exitErr *exitError
 	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
 		t.Fatalf("err = %v", err)
 	}
 	if viper.GetString("log-level") != "warn" || viper.GetBool("no-history") || viper.GetBool("clear-scrollback") {
 		t.Fatalf("log-level %q no-history %v clear-scrollback %v", viper.GetString("log-level"), viper.GetBool("no-history"), viper.GetBool("clear-scrollback"))
+	}
+	if viper.GetInt("max-tool-rounds") != 4 {
+		t.Fatalf("max-tool-rounds %d", viper.GetInt("max-tool-rounds"))
 	}
 }
 
@@ -166,6 +179,103 @@ func TestClearScrollbackDefaultsOff(t *testing.T) {
 	}
 	if !viper.GetBool("clear-scrollback") {
 		t.Fatal("CO_CLEAR_SCROLLBACK was ignored")
+	}
+}
+
+func TestMaxToolRoundsDefaultsTo64(t *testing.T) {
+	prepare(t)
+	cmd, err := newRootCmd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	flag := cmd.Flags().Lookup("max-tool-rounds")
+	if flag == nil || flag.DefValue != "64" {
+		t.Fatalf("flag %+v", flag)
+	}
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if viper.GetInt("max-tool-rounds") != 64 {
+		t.Fatalf("max-tool-rounds %d", viper.GetInt("max-tool-rounds"))
+	}
+}
+
+func TestMaxToolRoundsRejectsNonPositive(t *testing.T) {
+	prepare(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeHomeFile(t, provider.HomeConfig(home), "max-tool-rounds: 0\n")
+	_, _, err = startCLI(t, "", "version")
+	var exitErr *exitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "max-tool-rounds") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestConfigMaxToolRoundsStopsToolCalls(t *testing.T) {
+	var mu sync.Mutex
+	var withTools, without int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		if isTitleRequest(body) {
+			writeSSE(w, contentChunk("A short title"))
+			return
+		}
+		var payload struct {
+			Tools []any `json:"tools"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Errorf("decode: %v", err)
+			return
+		}
+		mu.Lock()
+		if len(payload.Tools) > 0 {
+			withTools++
+			mu.Unlock()
+			writeSSE(w, toolChunk("call_list_dir", "list_dir", `{"path":"."}`))
+			return
+		}
+		without++
+		mu.Unlock()
+		writeSSE(w, contentChunk("stopped"))
+	}))
+	defer server.Close()
+
+	prepare(t)
+	writeOllamaConfig(t, server.URL, "test-model")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := provider.HomeConfig(home)
+	body, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, append(body, []byte("max-tool-rounds: 1\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _, err := startCLI(t, "hi\n", "--model", "ollama/test-model", "--no-history")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != "stopped\n" {
+		t.Fatalf("stdout %q", stdout)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if withTools != 1 || without != 1 {
+		t.Fatalf("with tools %d without %d", withTools, without)
 	}
 }
 

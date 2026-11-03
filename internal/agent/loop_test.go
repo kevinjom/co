@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kevinjom/co/internal/config"
 	"github.com/kevinjom/co/internal/openai"
 )
 
@@ -193,6 +194,7 @@ func TestTurnDropsToolsAfterCap(t *testing.T) {
 	defer server.Close()
 
 	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), nil)
+	session.SetMaxToolRounds(2)
 	got, err := session.Turn(t.Context(), "keep going", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -203,16 +205,27 @@ func TestTurnDropsToolsAfterCap(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(calls) != maxToolRounds+1 {
-		t.Fatalf("calls = %d, want %d", len(calls), maxToolRounds+1)
+	if len(calls) != session.maxToolRounds+1 {
+		t.Fatalf("calls = %d, want %d", len(calls), session.maxToolRounds+1)
 	}
-	for i := range maxToolRounds {
+	for i := range session.maxToolRounds {
 		if len(calls[i].Tools) == 0 {
 			t.Fatalf("call %d omitted tools", i+1)
 		}
 	}
-	if len(calls[maxToolRounds].Tools) != 0 {
+	if len(calls[session.maxToolRounds].Tools) != 0 {
 		t.Fatal("final call included tools")
+	}
+}
+
+func TestNewSessionDefaultsToolRounds(t *testing.T) {
+	session := NewSession(openai.New("http://127.0.0.1:1"), "test-model", t.TempDir(), nil)
+	if session.maxToolRounds != config.DefaultMaxToolRounds {
+		t.Fatalf("maxToolRounds = %d, want %d", session.maxToolRounds, config.DefaultMaxToolRounds)
+	}
+	session.SetMaxToolRounds(0)
+	if session.maxToolRounds != config.DefaultMaxToolRounds {
+		t.Fatalf("maxToolRounds = %d after 0, want %d", session.maxToolRounds, config.DefaultMaxToolRounds)
 	}
 }
 

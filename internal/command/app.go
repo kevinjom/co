@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kevinjom/co/internal/agent"
+	"github.com/kevinjom/co/internal/config"
 	"github.com/kevinjom/co/internal/openai"
 	"github.com/kevinjom/co/internal/provider"
 	"github.com/kevinjom/co/internal/transcript"
@@ -21,23 +22,29 @@ type running struct {
 // App is the catalog and the sessions shared by both fronts.
 // The line reader uses the first session. The TUI can open more.
 type App struct {
-	cat       *provider.Catalog
-	home      string
-	cwd       string
-	noHistory bool
+	cat           *provider.Catalog
+	home          string
+	cwd           string
+	noHistory     bool
+	maxToolRounds int
 
 	running []running
 	model   string
 }
 
 // New starts an app that has no session until a model is activated.
-func New(cat *provider.Catalog, home, cwd string, noHistory bool) *App {
+// A maxToolRounds below 1 uses config.DefaultMaxToolRounds.
+func New(cat *provider.Catalog, home, cwd string, noHistory bool, maxToolRounds int) *App {
+	if maxToolRounds < 1 {
+		maxToolRounds = config.DefaultMaxToolRounds
+	}
 	return &App{
-		cat:       cat,
-		home:      home,
-		cwd:       cwd,
-		noHistory: noHistory,
-		running:   []running{},
+		cat:           cat,
+		home:          home,
+		cwd:           cwd,
+		noHistory:     noHistory,
+		maxToolRounds: maxToolRounds,
+		running:       []running{},
 	}
 }
 
@@ -148,7 +155,7 @@ func (a *App) Resume(ctx context.Context, id, model string) error {
 		history = loaded.Writer
 		recorder = loaded.Writer
 	}
-	session := agent.NewSession(client, wire, a.cwd, recorder)
+	session := a.newSession(client, wire, recorder)
 	session.Restore(loaded.Messages)
 	session.SetTitle(loaded.Title)
 	a.running = append(a.running, running{session: session, history: history})
@@ -222,10 +229,16 @@ func (a *App) use(ctx context.Context, raw string, persist bool, target *agent.S
 
 func (a *App) attach(client *openai.Client, wire, ref string) (*agent.Session, error) {
 	recorder, history := a.openHistory(ref)
-	session := agent.NewSession(client, wire, a.cwd, recorder)
+	session := a.newSession(client, wire, recorder)
 	a.running = append(a.running, running{session: session, history: history})
 	a.model = ref
 	return session, nil
+}
+
+func (a *App) newSession(client agent.Chatter, wire string, recorder agent.Recorder) *agent.Session {
+	session := agent.NewSession(client, wire, a.cwd, recorder)
+	session.SetMaxToolRounds(a.maxToolRounds)
+	return session
 }
 
 func (a *App) indexOf(session *agent.Session) int {

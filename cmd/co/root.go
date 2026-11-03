@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kevinjom/co/internal/command"
+	"github.com/kevinjom/co/internal/config"
 	"github.com/kevinjom/co/internal/provider"
 	"github.com/kevinjom/co/internal/transcript"
 
@@ -31,11 +32,12 @@ func newRootCmd() (*cobra.Command, error) {
 	}
 
 	cmd.PersistentFlags().String("config", "", "config file (default $HOME/.co/config.yaml)")
-	cmd.PersistentFlags().String("log-level", "info", "log level (debug, info, warn, error)")
+	cmd.PersistentFlags().String("log-level", config.DefaultLogLevel, "log level (debug, info, warn, error)")
 	cmd.Flags().String("model", "", "model as provider/model-id")
 	cmd.Flags().String("resume", "", "resume a session id, or latest")
 	cmd.Flags().Bool("no-history", false, "do not save the session transcript")
 	cmd.Flags().Bool("clear-scrollback", false, "erase the terminal scrollback before the TUI starts")
+	cmd.Flags().Int("max-tool-rounds", config.DefaultMaxToolRounds, "model calls that may include tools")
 
 	if err := bindFlag(cmd.PersistentFlags(), "config"); err != nil {
 		return nil, err
@@ -53,6 +55,9 @@ func newRootCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 	if err := bindFlag(cmd.Flags(), "clear-scrollback"); err != nil {
+		return nil, err
+	}
+	if err := bindFlag(cmd.Flags(), "max-tool-rounds"); err != nil {
 		return nil, err
 	}
 
@@ -94,26 +99,9 @@ func initConfig(cmd *cobra.Command) error {
 		}
 	}
 
-	viper.SetEnvPrefix("CO")
-	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
-	viper.AutomaticEnv()
-	if err := viper.BindEnv("model", "CO_MODEL"); err != nil {
-		return fmt.Errorf("binding model: %w", err)
+	if err := config.Prepare(); err != nil {
+		return err
 	}
-	if err := viper.BindEnv("log-level", "CO_LOG_LEVEL"); err != nil {
-		return fmt.Errorf("binding log-level: %w", err)
-	}
-	if err := viper.BindEnv("resume", "CO_RESUME"); err != nil {
-		return fmt.Errorf("binding resume: %w", err)
-	}
-	if err := viper.BindEnv("no-history", "CO_NO_HISTORY"); err != nil {
-		return fmt.Errorf("binding no-history: %w", err)
-	}
-	if err := viper.BindEnv("clear-scrollback", "CO_CLEAR_SCROLLBACK"); err != nil {
-		return fmt.Errorf("binding clear-scrollback: %w", err)
-	}
-	viper.SetDefault("log-level", "info")
-	viper.SetDefault("clear-scrollback", false)
 
 	if err := viper.ReadInConfig(); err != nil {
 		var missing viper.ConfigFileNotFoundError
@@ -123,19 +111,17 @@ func initConfig(cmd *cobra.Command) error {
 	}
 	// resume is a one-shot flag. A value in the settings file would reopen
 	// the same session on every launch.
-	ignoreConfigResume(cmd)
-
-	level, err := parseLogLevel(viper.GetString("log-level"))
-	if err != nil {
-		return err
+	config.ClearResume(flagChanged(cmd, "resume"))
+	if _, err := config.Load(); err != nil {
+		return usageError(err)
 	}
-	handler := slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: level})
+	handler := slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: config.Current().Level})
 	slog.SetDefault(slog.New(handler))
 	return nil
 }
 
 // setDefaultConfig prefers ~/.co/config.yaml and otherwise uses ./.co.yaml.
-// That file holds the default model, log-level, no-history, and clear-scrollback.
+// That file holds the default model, log-level, no-history, clear-scrollback, and max-tool-rounds.
 func setDefaultConfig(home string) error {
 	candidates := []string{
 		provider.HomeConfig(home),
@@ -158,30 +144,9 @@ func setDefaultConfig(home string) error {
 	return nil
 }
 
-func ignoreConfigResume(cmd *cobra.Command) {
-	if strings.TrimSpace(os.Getenv("CO_RESUME")) != "" {
-		return
-	}
-	flag := cmd.Root().Flags().Lookup("resume")
-	if flag != nil && flag.Changed {
-		return
-	}
-	viper.Set("resume", "")
-}
-
-func parseLogLevel(raw string) (slog.Level, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "info":
-		return slog.LevelInfo, nil
-	case "debug":
-		return slog.LevelDebug, nil
-	case "warn":
-		return slog.LevelWarn, nil
-	case "error":
-		return slog.LevelError, nil
-	default:
-		return 0, usageError(fmt.Errorf("invalid log-level %q", raw))
-	}
+func flagChanged(cmd *cobra.Command, name string) bool {
+	flag := cmd.Root().Flags().Lookup(name)
+	return flag != nil && flag.Changed
 }
 
 func run(cmd *cobra.Command, _ []string) error {
@@ -189,7 +154,7 @@ func run(cmd *cobra.Command, _ []string) error {
 }
 
 func start(cmd *cobra.Command, modelOverride string) error {
-	flagModel := explicitModel(cmd)
+	flagModel := config.ExplicitModel(flagChanged(cmd, "model"))
 	if strings.TrimSpace(modelOverride) != "" {
 		flagModel = strings.TrimSpace(modelOverride)
 	}
@@ -220,10 +185,17 @@ func start(cmd *cobra.Command, modelOverride string) error {
 	signals := startSignals(cmd.Context())
 	defer signals.close()
 
-	app := command.New(cat, home, cwd, viper.GetBool("no-history"))
+	settings := config.Current()
+	app := command.New(
+		cat,
+		home,
+		cwd,
+		settings.NoHistory,
+		settings.MaxToolRounds,
+	)
 	defer app.Close()
 
-	resumeID := strings.TrimSpace(viper.GetString("resume"))
+	resumeID := settings.Resume
 	interactive := isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout())
 	if resumeID != "" {
 		if err := app.Resume(signals.ctx, resumeID, flagModel); err != nil {
@@ -255,12 +227,5 @@ func start(cmd *cobra.Command, modelOverride string) error {
 		}
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
-	return repl(cmd, signals, app, cwd, viper.GetBool("clear-scrollback"))
-}
-
-func explicitModel(cmd *cobra.Command) string {
-	if cmd.Flags().Changed("model") {
-		return strings.TrimSpace(viper.GetString("model"))
-	}
-	return strings.TrimSpace(os.Getenv("CO_MODEL"))
+	return repl(cmd, signals, app, cwd, settings.ClearScrollback)
 }

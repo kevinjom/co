@@ -169,15 +169,20 @@ co session list --limit 5
 
 ## What the model can do
 
-The model gets three tools, all jailed to the working directory:
+The model gets filesystem tools, jailed to the working directory, and language-server tools when a server binary is on `PATH`. Today that is `gopls` for `.go` files. See [docs/lsp.md](docs/lsp.md).
 
 | Tool | |
 | --- | --- |
 | `list_dir` | One directory level. Path defaults to `.`. |
 | `read_file` | A window of a text file. Defaults to 200 lines from line 1. |
 | `grep` | A Go regular expression. Skips `.git`. Returns at most 50 matches. |
+| `lsp_definition` | Definition of the symbol at a line and column. |
+| `lsp_references` | References to that symbol, including the declaration. |
+| `lsp_hover` | Hover text from the language server. |
+| `lsp_symbols` | Symbols in one file (`path`) or a workspace search (`query`). |
+| `lsp_diagnostics` | Diagnostics for one file, or the workspace when `path` is omitted. |
 
-Paths are resolved, and a path that leaves the directory is rejected.
+Paths are resolved, and a path that leaves the directory is rejected. Line and column start at 1. A language-server result may name a file outside the working directory, and it does not include that file's body. Edits, rename, formatting, and code actions are not tools.
 
 ## Test
 

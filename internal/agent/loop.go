@@ -36,6 +36,7 @@ var _ Chatter = (*openai.Client)(nil)
 type Session struct {
 	client        Chatter
 	model         string
+	cwd           string
 	tools         *tools.Set
 	defs          []openai.Tool
 	messages      []openai.Message
@@ -54,13 +55,27 @@ func NewSession(client Chatter, model, cwd string, recorder Recorder) *Session {
 	return &Session{
 		client:        client,
 		model:         model,
+		cwd:           cwd,
 		tools:         set,
 		defs:          toolDefinitions(set),
 		recorder:      recorder,
 		maxToolRounds: config.DefaultMaxToolRounds,
 		messages: []openai.Message{
-			{Role: "system", Content: systemPrompt(cwd)},
+			{Role: "system", Content: systemPrompt(cwd, false)},
 		},
+	}
+}
+
+// EnableLSP adds the read-only language-server tools and tells the model to prefer them.
+// A nil service is ignored. The server is not started here.
+func (s *Session) EnableLSP(lang tools.Language) {
+	if lang == nil {
+		return
+	}
+	s.tools.EnableLSP(lang)
+	s.defs = toolDefinitions(s.tools)
+	if len(s.messages) > 0 && s.messages[0].Role == "system" {
+		s.messages[0].Content = systemPrompt(s.cwd, true)
 	}
 }
 
@@ -228,7 +243,7 @@ func hasUserMessage(messages []openai.Message) bool {
 	return false
 }
 
-func systemPrompt(cwd string) string {
+func systemPrompt(cwd string, lsp bool) string {
 	lines := []string{
 		"You are co, a read-only coding assistant.",
 		"The working directory is " + cwd + ".",
@@ -236,6 +251,11 @@ func systemPrompt(cwd string) string {
 		"Do not invent file contents or line counts.",
 		"If a tool returns an error, say so.",
 		"When you have enough information, reply in plain text and stop calling tools.",
+	}
+	if lsp {
+		lines = append(lines,
+			"Prefer lsp_definition, lsp_references, lsp_hover, lsp_symbols, and lsp_diagnostics over grep for definitions, references, and diagnostics.",
+		)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -267,11 +287,39 @@ func ToolDetail(call openai.ToolCall) string {
 	case "grep":
 		pattern, _ := args["pattern"].(string)
 		return fmt.Sprintf("pattern=%q", pattern)
-	default:
+	case "lsp_definition", "lsp_references", "lsp_hover":
+		return fmt.Sprintf("%s:%d:%d", detailPath(args), detailInt(args["line"]), detailInt(args["column"]))
+	case "lsp_symbols":
+		if query, _ := args["query"].(string); strings.TrimSpace(query) != "" {
+			return fmt.Sprintf("query=%q", query)
+		}
+		return "path=" + detailPath(args)
+	case "lsp_diagnostics":
 		path, _ := args["path"].(string)
-		if path == "" {
-			path = "."
+		if strings.TrimSpace(path) == "" {
+			return "workspace"
 		}
 		return "path=" + path
+	default:
+		return "path=" + detailPath(args)
+	}
+}
+
+func detailPath(args openai.Arguments) string {
+	path, _ := args["path"].(string)
+	if strings.TrimSpace(path) == "" {
+		return "."
+	}
+	return path
+}
+
+func detailInt(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	default:
+		return 0
 	}
 }

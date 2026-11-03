@@ -311,9 +311,6 @@ func (m *model) onPaste(text string) (tea.Model, tea.Cmd) {
 		m.paint()
 		return m, nil
 	case modeChat:
-		if m.tab().busy {
-			return m, nil
-		}
 		m.stopComplete()
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(tea.PasteMsg{Content: text})

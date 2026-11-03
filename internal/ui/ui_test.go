@@ -853,3 +853,144 @@ func TestWorkingStatusAnimates(t *testing.T) {
 		t.Fatalf("frame %q -> %q cmd %v", first, second, cmd != nil)
 	}
 }
+
+func TestInputStaysOpenWhileBusy(t *testing.T) {
+	m := newTestModel(t)
+	m.input.Focus()
+	m.input.SetValue("hello")
+	m.Update(press(tea.KeyEnter, 0))
+	if !m.tab().busy || !m.input.Focused() {
+		t.Fatalf("busy %v focused %v", m.tab().busy, m.input.Focused())
+	}
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(*model)
+	if got.input.Value() != "a" || got.tab().turnID != 1 {
+		t.Fatalf("value %q turn %d", got.input.Value(), got.tab().turnID)
+	}
+}
+
+func TestEnterWhileBusyQueuesTheLine(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().busy = true
+	m.tab().turnID = 4
+	m.input.SetValue("look here")
+	_, cmd := m.Update(press(tea.KeyEnter, 0))
+	if cmd != nil || !m.tab().busy || m.tab().turnID != 4 || m.input.Value() != "" {
+		t.Fatalf("busy %v turn %d value %q cmd %v", m.tab().busy, m.tab().turnID, m.input.Value(), cmd != nil)
+	}
+	if len(m.tab().queue) != 1 || m.tab().queue[0] != "look here" {
+		t.Fatalf("queue %#v", m.tab().queue)
+	}
+	if strings.Contains(ansi.Strip(m.renderTranscript()), "look here") {
+		t.Fatal("queued line entered the transcript")
+	}
+	plain := ansi.Strip(m.View().Content)
+	if !strings.Contains(plain, "· look here") || !strings.Contains(plain, "enter queue") {
+		t.Fatalf("view %q", plain)
+	}
+	if h := lipgloss.Height(m.View().Content); h != 24 {
+		t.Fatalf("height %d", h)
+	}
+
+	m.input.SetValue("and the tests")
+	m.Update(press(tea.KeyEnter, 0))
+	plain = ansi.Strip(m.View().Content)
+	first := strings.Index(plain, "· look here")
+	second := strings.Index(plain, "· and the tests")
+	if first < 0 || second < 0 || first > second {
+		t.Fatalf("queue order %q", plain)
+	}
+}
+
+func TestFinishedTurnSendsTheQueue(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().turnID = 1
+	m.tab().busy = true
+	m.tab().events = make(chan tea.Msg)
+	m.tab().queue = []string{"one", "two"}
+	updated, cmd := m.Update(turnDoneMsg{tabID: 1, id: 1, answer: "done"})
+	got := updated.(*model)
+	if cmd == nil || !got.tab().busy || len(got.tab().queue) != 0 || got.tab().turnID != 2 {
+		t.Fatalf("busy %v turn %d queue %#v cmd %v", got.tab().busy, got.tab().turnID, got.tab().queue, cmd != nil)
+	}
+	plain := ansi.Strip(got.renderTranscript())
+	one := strings.Index(plain, "one")
+	two := strings.Index(plain, "two")
+	if one < 0 || two < 0 || one > two || strings.Contains(plain, "· one") {
+		t.Fatalf("transcript %q", plain)
+	}
+	if strings.Contains(ansi.Strip(got.View().Content), "· one") {
+		t.Fatal("queue still shown")
+	}
+}
+
+func TestCommandWhileBusyIsNotQueued(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().busy = true
+	m.tab().turnID = 2
+	m.director = &fakeDirector{models: []string{"ollama/a"}, session: m.tab().session, ready: true}
+	m.input.SetValue("/models")
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if cmd == nil || got.mode != modeModels || len(got.tab().queue) != 0 || !got.tab().busy {
+		t.Fatalf("mode %d busy %v queue %#v cmd %v", got.mode, got.tab().busy, got.tab().queue, cmd != nil)
+	}
+}
+
+func TestCtrlCClearsTheBoxBeforeStopping(t *testing.T) {
+	m := newTestModel(t)
+	canceled := false
+	m.tab().busy = true
+	m.tab().cancel = func() { canceled = true }
+	m.tab().queue = []string{"stay"}
+	m.input.SetValue("draft")
+	m.Update(press('c', tea.ModCtrl))
+	if canceled || m.input.Value() != "" || len(m.tab().queue) != 1 || m.quitting {
+		t.Fatalf("canceled %v value %q queue %#v", canceled, m.input.Value(), m.tab().queue)
+	}
+	m.Update(press('c', tea.ModCtrl))
+	if !canceled || len(m.tab().queue) != 0 || m.quitting {
+		t.Fatalf("canceled %v queue %#v quitting %v", canceled, m.tab().queue, m.quitting)
+	}
+}
+
+func TestEscRecallsTheNewestQueuedLine(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().busy = true
+	m.tab().queue = []string{"first", "second"}
+	m.input.SetValue("typing")
+	m.Update(press(tea.KeyEsc, 0))
+	if m.input.Value() != "typing" || len(m.tab().queue) != 2 {
+		t.Fatalf("value %q queue %#v", m.input.Value(), m.tab().queue)
+	}
+	m.input.SetValue("")
+	m.Update(press(tea.KeyEsc, 0))
+	if m.input.Value() != "second" || len(m.tab().queue) != 1 || m.tab().queue[0] != "first" {
+		t.Fatalf("value %q queue %#v", m.input.Value(), m.tab().queue)
+	}
+	plain := ansi.Strip(m.View().Content)
+	if strings.Contains(plain, "· second") || !strings.Contains(plain, "· first") {
+		t.Fatalf("view %q", plain)
+	}
+}
+
+func TestQueueBelongsToTheSession(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().busy = true
+	m.tab().queue = []string{"only mine"}
+	other := agent.NewSession(openai.New("http://127.0.0.1:1"), "test-model", m.cwd, nil)
+	m.tabs = append(m.tabs, newTab(2, other))
+	m.switchTo(1)
+	if strings.Contains(ansi.Strip(m.View().Content), "only mine") {
+		t.Fatal("other session shows the queue")
+	}
+	m.input.SetValue("hello")
+	_, cmd := m.Update(press(tea.KeyEnter, 0))
+	if cmd == nil || len(m.tabs[0].queue) != 1 || m.tabs[0].queue[0] != "only mine" {
+		t.Fatalf("queue %#v cmd %v", m.tabs[0].queue, cmd != nil)
+	}
+	m.switchTo(0)
+	if !strings.Contains(ansi.Strip(m.View().Content), "· only mine") {
+		t.Fatal("queue lost")
+	}
+}

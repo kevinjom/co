@@ -297,7 +297,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishTurn(msg)
 	}
 
-	if m.tab().busy || m.mode != modeChat {
+	if m.mode != modeChat {
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -328,16 +328,28 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
+		// A draft in the box is cleared first. The turn stops only when the box is empty.
+		if m.tab().busy && strings.TrimSpace(m.input.Value()) != "" {
+			m.input.Reset()
+			m.stopComplete()
+			m.layout()
+			return m, nil
+		}
 		if m.tab().busy {
+			m.tab().queue = []string{}
 			m.stopTurn(m.tab())
+			m.layout()
 			return m, nil
 		}
 		return m.quit()
 	case "ctrl+d":
 		if m.tab().busy || strings.TrimSpace(m.input.Value()) != "" {
-			break
+			return m, nil
 		}
 		return m.quit()
+	case "esc":
+		m.recallQueue()
+		return m, nil
 	case "pgup":
 		m.viewport.PageUp()
 		return m, nil
@@ -353,18 +365,12 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "enter", "ctrl+m":
-		if m.tab().busy {
-			return m, nil
-		}
 		m.acceptCommand()
 		return m, m.submit()
 	case "tab":
 		return m.completeCommand()
 	}
 
-	if m.tab().busy {
-		return m, nil
-	}
 	m.stopComplete()
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
@@ -373,9 +379,6 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) moveCommand(delta int) bool {
-	if m.tab().busy {
-		return false
-	}
 	done := command.Complete(m.input.Value(), m.completeIndex)
 	if done.Value == "" {
 		return false
@@ -390,7 +393,7 @@ func (m *model) moveCommand(delta int) bool {
 }
 
 func (m *model) completeCommand() (tea.Model, tea.Cmd) {
-	if m.tab().busy || !m.acceptCommand() {
+	if !m.acceptCommand() {
 		return m, nil
 	}
 	m.layout()
@@ -417,7 +420,7 @@ func (m *model) stopComplete() {
 }
 
 func (m *model) commandOverlay() string {
-	if m.mode != modeChat || m.tab().busy {
+	if m.mode != modeChat {
 		return ""
 	}
 	done := command.Complete(m.input.Value(), m.completeIndex)
@@ -472,17 +475,35 @@ func (m *model) submit() tea.Cmd {
 		return nil
 	}
 
+	if m.tab().busy {
+		m.tab().queue = append(m.tab().queue, text)
+		m.input.Reset()
+		m.layout()
+		return nil
+	}
+
 	m.input.Reset()
-	m.input.Blur()
+	return m.startTurn(m.tab(), []string{text})
+}
+
+func (m *model) startTurn(item *tab, lines []string) tea.Cmd {
+	if item == nil || item.session == nil || len(lines) == 0 {
+		return nil
+	}
 	spinning := m.anyBusy()
-	item := m.tab()
 	item.busy = true
 	item.state = statusWorking
 	item.activity = "thinking"
 	item.answered = false
 	item.answerOpen = false
 	item.reasoningOpen = false
-	m.addBlock(block{kind: blockUser, text: text})
+	for _, line := range lines {
+		item.blocks = append(item.blocks, block{kind: blockUser, text: line})
+	}
+	if item.id == m.tab().id {
+		m.layout()
+		m.paint()
+	}
 
 	item.turnID++
 	turn := item.turnID
@@ -490,11 +511,12 @@ func (m *model) submit() tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	item.cancel = cancel
 
+	sent := append([]string{}, lines...)
 	ch := make(chan tea.Msg, eventBuffer)
 	session := item.session
 	go func() {
 		defer close(ch)
-		answer, err := session.Turn(ctx, text, func(ev agent.Event) {
+		answer, err := session.Reply(ctx, sent, func(ev agent.Event) {
 			ch <- eventMsg{tabID: tabID, id: turn, event: ev}
 		})
 		ch <- turnDoneMsg{tabID: tabID, id: turn, answer: answer, err: err}
@@ -504,6 +526,28 @@ func (m *model) submit() tea.Cmd {
 		return waitEvent(ch)
 	}
 	return tea.Batch(waitEvent(ch), m.spin.Tick)
+}
+
+// drainQueue starts one follow-up turn for every line still waiting on this session.
+func (m *model) drainQueue(item *tab) tea.Cmd {
+	if item == nil || item.busy || item.session == nil || len(item.queue) == 0 {
+		return nil
+	}
+	lines := append([]string{}, item.queue...)
+	item.queue = []string{}
+	return m.startTurn(item, lines)
+}
+
+// recallQueue pulls the newest unsent line back into the box.
+func (m *model) recallQueue() {
+	item := m.tab()
+	if strings.TrimSpace(m.input.Value()) != "" || len(item.queue) == 0 {
+		return
+	}
+	last := item.queue[len(item.queue)-1]
+	item.queue = item.queue[:len(item.queue)-1]
+	m.input.SetValue(last)
+	m.layout()
 }
 
 func (m *model) openSession() tea.Cmd {
@@ -590,11 +634,17 @@ func (m *model) finishTurn(msg turnDoneMsg) (tea.Model, tea.Cmd) {
 		item.blocks = append(item.blocks, block{kind: blockError, text: msg.err.Error()})
 	}
 	item.answered = false
+	cmd := m.drainQueue(item)
+	if item.id == m.tab().id {
+		m.layout()
+		m.paint()
+	}
+	if cmd != nil {
+		return m, cmd
+	}
 	if item.id != m.tab().id {
 		return m, nil
 	}
-	m.layout()
-	m.paint()
 	return m, m.input.Focus()
 }
 
@@ -763,7 +813,7 @@ func (m *model) wheelChat(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	if lines == 0 {
 		return m, nil
 	}
-	if m.pointerOverInput(msg.Y) && !m.tab().busy {
+	if m.pointerOverInput(msg.Y) {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		m.layout()
@@ -790,10 +840,7 @@ func wheelLines(button tea.MouseButton) int {
 
 // pointerOverInput reports whether y is on the composer rather than the transcript.
 func (m *model) pointerOverInput(y int) bool {
-	top := lipgloss.Height(m.headerLine()) + m.viewport.Height()
-	if extra := m.overlayView(); extra != "" {
-		top += lipgloss.Height(extra)
-	}
+	top := lipgloss.Height(m.headerLine()) + m.viewport.Height() + m.aboveInputHeight()
 	return y >= top
 }
 
@@ -828,12 +875,8 @@ func (m *model) layout() {
 	}
 	m.input.SetWidth(inner)
 	inputH := lipgloss.Height(m.inputView())
-	overlayH := 0
-	if extra := m.overlayView(); extra != "" {
-		overlayH = lipgloss.Height(extra)
-	}
 	const chrome = 4 // header, rule, status, help
-	vpH := height - chrome - inputH - overlayH
+	vpH := height - chrome - inputH - m.aboveInputHeight()
 	if vpH < 1 {
 		vpH = 1
 	}
@@ -892,6 +935,9 @@ func (m *model) View() tea.View {
 	parts := []string{m.headerLine(), m.transcriptView()}
 	if extra := m.overlayView(); extra != "" {
 		parts = append(parts, extra)
+	}
+	if queue := m.queueView(); queue != "" {
+		parts = append(parts, queue)
 	}
 	parts = append(parts, m.inputView(), m.statusLine(), m.helpLine())
 	body := lipgloss.JoinVertical(lipgloss.Left, parts...)

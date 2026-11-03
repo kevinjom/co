@@ -107,11 +107,23 @@ func (s *Session) Messages() []openai.Message {
 // On a model error the user line stays in the session.
 // When the turn is canceled after some text has arrived, that partial answer is kept too.
 func (s *Session) Turn(ctx context.Context, userText string, observe Observer) (string, error) {
+	return s.Reply(ctx, []string{userText}, observe)
+}
+
+// Reply appends each line as its own user message, then runs one tool loop.
+// The model answers the lines once. An empty list does not call the model.
+// On a model error the lines stay in the session.
+func (s *Session) Reply(ctx context.Context, lines []string, observe Observer) (string, error) {
+	if len(lines) == 0 {
+		return "", nil
+	}
 	first := !hasUserMessage(s.messages)
-	s.remember(openai.Message{Role: "user", Content: userText}, false)
+	for _, line := range lines {
+		s.remember(openai.Message{Role: "user", Content: line}, false)
+	}
 	if first {
-		s.storeFallbackTitle(userText)
-		s.refineTitle(userText)
+		s.storeFallbackTitle(lines[0])
+		s.refineTitle(lines[0])
 	}
 	return s.converse(ctx, observe)
 }

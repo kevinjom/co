@@ -136,11 +136,80 @@ func (m *model) statusLine() string {
 	return joinSides(m.usableWidth(), left, right)
 }
 
+// aboveInputHeight is the command list and unsent queue drawn between the transcript and the box.
+func (m *model) aboveInputHeight() int {
+	height := 0
+	if extra := m.overlayView(); extra != "" {
+		height += lipgloss.Height(extra)
+	}
+	if queue := m.queueView(); queue != "" {
+		height += lipgloss.Height(queue)
+	}
+	return height
+}
+
+// queueView lists this session's unsent lines, oldest first, just above the box.
+func (m *model) queueView() string {
+	if m.mode != modeChat {
+		return ""
+	}
+	lines := m.tab().queue
+	if len(lines) == 0 {
+		return ""
+	}
+	limit := m.queueLimit()
+	note := ""
+	if len(lines) > limit {
+		keep := limit
+		if limit > 1 {
+			keep = limit - 1
+			note = fmt.Sprintf("· %d more", len(lines)-keep)
+		}
+		lines = lines[len(lines)-keep:]
+	}
+	width := m.usableWidth()
+	rows := make([]string, 0, len(lines)+1)
+	if note != "" {
+		rows = append(rows, m.theme.dim.Render(ansi.Truncate(note, width, "…")))
+	}
+	for _, line := range lines {
+		text := strings.Join(strings.Fields(line), " ")
+		row := "· " + text
+		if width > 0 {
+			row = ansi.Truncate(row, width, "…")
+		}
+		rows = append(rows, m.theme.dim.Render(row))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func (m *model) queueLimit() int {
+	inputH := lipgloss.Height(m.inputView())
+	overlayH := 0
+	if extra := m.overlayView(); extra != "" {
+		overlayH = lipgloss.Height(extra)
+	}
+	height := m.height
+	if height <= 0 {
+		height = 24
+	}
+	const frame = 5 // header, rule, status, help, and one transcript row
+	limit := height - frame - inputH - overlayH
+	if limit < 1 {
+		return 1
+	}
+	return limit
+}
+
 func (m *model) helpLine() string {
 	text := "enter send  ·  ctrl+j newline  ·  wheel/pgup/pgdn scroll  ·  ctrl+c quit"
 	switch {
+	case m.tab().busy && strings.TrimSpace(m.input.Value()) != "":
+		text = "enter queue  ·  ctrl+c clear"
+	case m.tab().busy && len(m.tab().queue) > 0:
+		text = "enter queue  ·  esc recall  ·  ctrl+c stop"
 	case m.tab().busy:
-		text = "ctrl+c stop  ·  wheel/pgup/pgdn scroll"
+		text = "enter queue  ·  ctrl+j newline  ·  ctrl+c stop"
 	case (m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions) && m.session() == nil:
 		text = "enter select  ·  esc quit  ·  up/down move"
 	case m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions:

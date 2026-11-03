@@ -594,3 +594,33 @@ func TestRestoreIsSentOnTheNextTurn(t *testing.T) {
 		t.Fatalf("recorded %d", rec.calls)
 	}
 }
+
+func TestReplySendsEveryLineOnce(t *testing.T) {
+	chat := &scriptChat{}
+	session := NewSession(chat, "test-model", t.TempDir(), nil)
+	got, err := session.Reply(t.Context(), []string{"look at the parser", "and the tests"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "ok" || len(chat.seen) != 1 {
+		t.Fatalf("answer %q calls %d", got, len(chat.seen))
+	}
+	var users []string
+	for _, msg := range chat.seen[0] {
+		if msg.Role == "user" {
+			users = append(users, msg.Content)
+		}
+	}
+	if len(users) != 2 || users[0] != "look at the parser" || users[1] != "and the tests" {
+		t.Fatalf("users %#v", users)
+	}
+}
+
+func TestReplyEmptyDoesNotCall(t *testing.T) {
+	chat := &scriptChat{}
+	session := NewSession(chat, "test-model", t.TempDir(), nil)
+	got, err := session.Reply(t.Context(), nil, nil)
+	if err != nil || got != "" || len(chat.seen) != 0 {
+		t.Fatalf("answer %q calls %d err %v", got, len(chat.seen), err)
+	}
+}

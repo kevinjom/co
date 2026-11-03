@@ -58,6 +58,9 @@ type tab struct {
 	answered      bool
 	answerOpen    bool
 	reasoningOpen bool
+	// queue holds this session's unsent chat lines, oldest first.
+	// They join the conversation only when the current turn finishes.
+	queue []string
 }
 
 func newTab(id int, session *agent.Session) tab {
@@ -68,6 +71,7 @@ func newTab(id int, session *agent.Session) tab {
 		title:   newSessionTitle,
 		state:   statusNew,
 		follow:  true,
+		queue:   []string{},
 	}
 	if session != nil {
 		if title := session.Title(); title != "" {

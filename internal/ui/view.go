@@ -62,6 +62,8 @@ func (m *model) statusLine() string {
 		}
 		m.spin.Style = lipgloss.NewStyle().Foreground(ink)
 		left = m.spin.View() + style.Render(label)
+	case m.copied:
+		left = m.theme.dim.Render("copied")
 	case m.mode == modeModels:
 		left = m.theme.dim.Render("choose a model")
 	case m.mode == modeSessions:
@@ -147,7 +149,7 @@ func (m *model) queueLimit() int {
 }
 
 func (m *model) helpLine() string {
-	text := "enter send  ·  ctrl+j newline  ·  wheel/pgup/pgdn scroll  ·  ctrl+c quit"
+	text := "enter send  ·  ctrl+j newline  ·  drag copy  ·  wheel/pgup/pgdn scroll  ·  ctrl+c quit"
 	switch {
 	case m.tab().busy && strings.TrimSpace(m.input.Value()) != "":
 		text = "enter queue  ·  ctrl+c clear"

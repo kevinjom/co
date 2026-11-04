@@ -117,6 +117,12 @@ type model struct {
 	width  int
 	height int
 
+	// sel is a drag selection. Cell-motion mouse mode keeps wheel scrolling,
+	// and it also takes the drag away from the terminal, so the program
+	// copies the selected cells itself.
+	sel    textSelection
+	copied bool
+
 	dirty        bool
 	paintWaiting bool
 	lastPaint    time.Time
@@ -259,6 +265,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		return m.onWheel(msg)
 
+	case tea.MouseClickMsg:
+		return m.onClick(tea.Mouse(msg))
+
+	case tea.MouseMotionMsg:
+		return m.onDrag(tea.Mouse(msg))
+
+	case tea.MouseReleaseMsg:
+		return m.onRelease(tea.Mouse(msg))
+
 	case tea.PasteMsg:
 		return m.onPaste(msg.Content)
 
@@ -312,6 +327,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Cmd+C has no terminal selection to copy while mouse reporting is on.
+	// A drag already copied; ctrl+c copies again and leaves the session up.
+	if msg.String() == "ctrl+c" {
+		if text, ok := m.selectionText(); ok {
+			m.clearSelection()
+			return m, copyClipboard(text)
+		}
+	}
+	m.clearSelection()
 	if m.pending {
 		if msg.String() == "ctrl+c" {
 			return m.quit()
@@ -801,6 +825,7 @@ func (m *model) addBlock(b block) {
 }
 
 func (m *model) onWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	m.clearSelection()
 	switch m.mode {
 	case modeModels, modeProviders, modeSessions, modeThemes:
 		m.wheelPicker(msg.Button)
@@ -868,6 +893,9 @@ func (m *model) paint() {
 }
 
 func (m *model) paintFollow(follow bool) {
+	// The cells under a selection moved. Drop it rather than highlight
+	// whatever landed on those coordinates.
+	m.clearSelection()
 	m.dirty = false
 	m.lastPaint = time.Now()
 	col := m.transcriptColumnWidth()
@@ -937,6 +965,13 @@ func (m *model) usableWidth() int {
 	return 80
 }
 
+func (m *model) viewHeight() int {
+	if m.height > 0 {
+		return m.height
+	}
+	return 24
+}
+
 func (m *model) contentWidth() int {
 	if w := m.viewport.Width(); w > 0 {
 		return w
@@ -951,6 +986,17 @@ func (m *model) View() tea.View {
 		return v
 	}
 
+	body := highlightSelection(m.frame(), m.usableWidth(), m.viewHeight(), m.sel)
+	v := tea.NewView(body)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	v.ReportFocus = true
+	v.WindowTitle = "co"
+	v.ProgramStatus = m.programStatus()
+	return v
+}
+
+func (m *model) frame() string {
 	parts := []string{m.headerLine(), m.transcriptView()}
 	if extra := m.overlayView(); extra != "" {
 		parts = append(parts, extra)
@@ -959,14 +1005,7 @@ func (m *model) View() tea.View {
 		parts = append(parts, queue)
 	}
 	parts = append(parts, m.inputView(), m.statusLine(), m.helpLine())
-	body := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	v := tea.NewView(body)
-	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
-	v.ReportFocus = true
-	v.WindowTitle = "co"
-	v.ProgramStatus = m.programStatus()
-	return v
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (m *model) programStatus() *tea.ProgramStatus {

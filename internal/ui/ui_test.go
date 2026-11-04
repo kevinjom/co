@@ -47,7 +47,7 @@ func TestViewFillsTheTerminal(t *testing.T) {
 	if !strings.Contains(plain, "co") || !strings.Contains(plain, "Ask about this directory") {
 		t.Fatalf("view %q", plain)
 	}
-	if !strings.Contains(plain, "enter send") {
+	if !strings.Contains(plain, "enter send") || !strings.Contains(plain, "drag copy") {
 		t.Fatalf("help missing: %q", plain)
 	}
 	if !strings.Contains(plain, "> Ask about this codebase") {
@@ -695,6 +695,94 @@ func TestWheelScrollsALineAtATime(t *testing.T) {
 	if !got.viewport.AtBottom() {
 		t.Fatal("wheel down should pin to the bottom again")
 	}
+}
+
+func TestDragCopiesTheFrame(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().blocks = []block{{kind: blockNote, text: "hello"}}
+	m.layout()
+	m.paint()
+	plain := ansi.Strip(m.View().Content)
+	x, y, ok := findCell(plain, "hello")
+	if !ok {
+		t.Fatalf("view %q", plain)
+	}
+
+	updated, cmd := m.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+	got := updated.(*model)
+	if cmd != nil || got.copied {
+		t.Fatal("a click is not a selection")
+	}
+	updated, _ = got.Update(tea.MouseMotionMsg{X: x + 4, Y: y, Button: tea.MouseLeft})
+	got = updated.(*model)
+	raw := got.View().Content
+	if !strings.Contains(ansi.Strip(raw), "hello") || !strings.Contains(raw, "\x1b[7") {
+		t.Fatalf("highlight %q", ansi.Strip(raw))
+	}
+	if h := lipgloss.Height(raw); h != 24 {
+		t.Fatalf("height %d", h)
+	}
+
+	updated, cmd = got.Update(tea.MouseReleaseMsg{X: x + 4, Y: y, Button: tea.MouseLeft})
+	got = updated.(*model)
+	if cmd == nil || !got.copied {
+		t.Fatal("expected the selection on the clipboard")
+	}
+	text, ok := got.selectionText()
+	if !ok || text != "hello" {
+		t.Fatalf("copied %q", text)
+	}
+	if !strings.Contains(ansi.Strip(got.View().Content), "copied") {
+		t.Fatal("status did not confirm the copy")
+	}
+
+	updated, _ = got.Update(tea.MouseWheelMsg{Y: 2, Button: tea.MouseWheelUp})
+	got = updated.(*model)
+	if got.copied || strings.Contains(got.View().Content, "\x1b[7") {
+		t.Fatal("scrolling left the selection up")
+	}
+}
+
+func TestCtrlCCopiesInsteadOfQuitting(t *testing.T) {
+	m := newTestModel(t)
+	m.sel = textSelection{phase: selectKept, ax: 0, ay: 0, bx: 1, by: 0}
+	updated, cmd := m.Update(press('c', tea.ModCtrl))
+	got := updated.(*model)
+	if got.quitting || cmd == nil || got.sel.phase != selectNone {
+		t.Fatalf("quitting %v phase %d cmd %v", got.quitting, got.sel.phase, cmd != nil)
+	}
+	updated, cmd = got.Update(press('c', tea.ModCtrl))
+	got = updated.(*model)
+	if !got.quitting || cmd == nil {
+		t.Fatal("expected the next ctrl+c to quit")
+	}
+}
+
+func TestSelectedStringKeepsLineBreaks(t *testing.T) {
+	sel := textSelection{phase: selectKept, ax: 1, ay: 0, bx: 2, by: 1}
+	got, ok := selectedString("hello\nworld", 10, 2, sel)
+	if !ok || got != "ello\nwor" {
+		t.Fatalf("%q %v", got, ok)
+	}
+	if _, ok := selectedString("hello\nworld", 10, 2, textSelection{phase: selectKept}); ok {
+		t.Fatal("a click copied a cell")
+	}
+	wide := textSelection{phase: selectKept, ax: 0, ay: 0, bx: 1, by: 0}
+	got, ok = selectedString("你a", 4, 1, wide)
+	if !ok || got != "你" {
+		t.Fatalf("wide %q %v", got, ok)
+	}
+}
+
+func findCell(plain, needle string) (x, y int, ok bool) {
+	for y, line := range strings.Split(plain, "\n") {
+		i := strings.Index(line, needle)
+		if i < 0 {
+			continue
+		}
+		return ansi.StringWidthWc(line[:i]), y, true
+	}
+	return 0, 0, false
 }
 
 func TestWheelMovesThePicker(t *testing.T) {

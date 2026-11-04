@@ -327,6 +327,41 @@ func TestSaveSelectionPreservesOtherKeys(t *testing.T) {
 	}
 }
 
+func TestSaveThemePreservesOtherKeys(t *testing.T) {
+	home := t.TempDir()
+	path := HomeConfig(home)
+	writeYAML(t, path, "# keep me\nlog-level: debug\n")
+	cat, err := Load(LoadOptions{Home: home, ProjectDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.SaveTheme("ROSE"); err != nil {
+		t.Fatal(err)
+	}
+	text := readTestFile(t, path)
+	if !strings.Contains(text, "log-level: debug") || !strings.Contains(text, "theme: rose") {
+		t.Fatalf("config:\n%s", text)
+	}
+	if !strings.Contains(text, "keep me") {
+		t.Fatalf("comment dropped:\n%s", text)
+	}
+	if err := cat.SaveTheme("nope"); err == nil {
+		t.Fatal("accepted an unknown theme")
+	}
+
+	isolated, err := Load(LoadOptions{Home: home, ProjectDir: t.TempDir(), ConfigFile: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := readTestFile(t, path)
+	if err := isolated.SaveTheme("teal"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readTestFile(t, path); got != before {
+		t.Fatalf("isolated config changed:\n%s", got)
+	}
+}
+
 func TestProvidersFollowModel(t *testing.T) {
 	home := t.TempDir()
 	configPath := HomeConfig(home)

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kevinjom/co/internal/theme"
+
 	"github.com/spf13/viper"
 )
 
@@ -20,6 +22,8 @@ const (
 	DefaultMaxToolRounds = 64
 	// DefaultSessionLimit is how many sessions `co session list` prints when limit is unset.
 	DefaultSessionLimit = 20
+	// DefaultTheme is the TUI palette when theme is unset.
+	DefaultTheme = theme.Default
 )
 
 // Settings is the resolved process configuration.
@@ -30,6 +34,7 @@ type Settings struct {
 	MaxToolRounds   int
 	Resume          string
 	Limit           int
+	Theme           string
 }
 
 type setting struct {
@@ -49,6 +54,7 @@ var settings = []setting{
 	{key: "clear-scrollback", env: "CO_CLEAR_SCROLLBACK", def: false, hasDefault: true},
 	{key: "max-tool-rounds", env: "CO_MAX_TOOL_ROUNDS", def: DefaultMaxToolRounds, hasDefault: true},
 	{key: "limit", env: "CO_LIMIT", def: DefaultSessionLimit, hasDefault: true},
+	{key: "theme", env: "CO_THEME", def: DefaultTheme, hasDefault: true},
 }
 
 var current Settings
@@ -81,6 +87,10 @@ func Load() (Settings, error) {
 	if rounds < 1 {
 		return Settings{}, fmt.Errorf("invalid max-tool-rounds %v", viper.Get("max-tool-rounds"))
 	}
+	name, err := theme.Parse(viper.GetString("theme"))
+	if err != nil {
+		return Settings{}, err
+	}
 	current = Settings{
 		Level:           level,
 		NoHistory:       viper.GetBool("no-history"),
@@ -88,6 +98,7 @@ func Load() (Settings, error) {
 		MaxToolRounds:   rounds,
 		Resume:          strings.TrimSpace(viper.GetString("resume")),
 		Limit:           viper.GetInt("limit"),
+		Theme:           name,
 	}
 	return current, nil
 }

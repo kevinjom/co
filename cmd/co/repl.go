@@ -11,15 +11,16 @@ import (
 
 	"github.com/kevinjom/co/internal/agent"
 	"github.com/kevinjom/co/internal/command"
+	"github.com/kevinjom/co/internal/theme"
 	"github.com/kevinjom/co/internal/ui"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 
-func repl(cmd *cobra.Command, signals *signalSession, app *command.App, cwd string, clearScrollback bool) error {
+func repl(cmd *cobra.Command, signals *signalSession, app *command.App, cwd string, clearScrollback bool, themeName string) error {
 	if isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout()) {
-		err := ui.Run(signals.ctx, app, cwd, clearScrollback)
+		err := ui.Run(signals.ctx, app, cwd, clearScrollback, themeName)
 		if err != nil && signals.ctx.Err() != nil {
 			return signals.err()
 		}
@@ -121,6 +122,24 @@ func runLineCommand(cmd *cobra.Command, signals *signalSession, app *command.App
 		return true, nil
 	case command.KindNew, command.KindSessions:
 		fmt.Fprintln(stderr, "available in the TUI")
+		return true, nil
+	case command.KindTheme:
+		if parsed.Arg == "" {
+			for _, name := range theme.Names() {
+				fmt.Fprintln(stderr, name)
+			}
+			return true, nil
+		}
+		name, err := theme.Parse(parsed.Arg)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return true, nil
+		}
+		if err := app.SaveTheme(name); err != nil {
+			fmt.Fprintln(stderr, err)
+			return true, nil
+		}
+		fmt.Fprintf(stderr, "theme %s\n", name)
 		return true, nil
 	case command.KindModels:
 		if parsed.Arg == "" {

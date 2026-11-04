@@ -16,6 +16,7 @@ const (
 	KindConnect
 	KindNew
 	KindSessions
+	KindTheme
 	KindError
 )
 
@@ -31,16 +32,18 @@ const (
 	cmdConnect  = "/connect"
 	cmdNew      = "/new"
 	cmdSessions = "/sessions"
+	cmdTheme    = "/theme"
 )
 
 func slashCommands() []string {
-	return []string{cmdModels, cmdConnect, cmdNew, cmdSessions}
+	return []string{cmdModels, cmdConnect, cmdNew, cmdSessions, cmdTheme}
 }
 
 // Parse classifies a line before it can become a chat turn.
 // /models and /models <provider>/<model-id> select a model.
 // /connect lists providers that accept a key. /connect <provider> skips that list.
 // /new starts another session. /sessions lists the open ones.
+// /theme lists palettes. /theme <name> selects one.
 // exit and quit leave the session.
 func Parse(line string) Parsed {
 	line = strings.TrimSpace(line)
@@ -72,6 +75,11 @@ func Parse(line string) Parsed {
 			return Parsed{Kind: KindError, Err: errors.New("usage: /sessions")}
 		}
 		return Parsed{Kind: KindSessions}
+	case cmdTheme:
+		if strings.ContainsAny(arg, " \t") {
+			return Parsed{Kind: KindError, Err: errors.New("usage: /theme [name]")}
+		}
+		return Parsed{Kind: KindTheme, Arg: arg}
 	default:
 		return Parsed{Kind: KindError, Err: fmt.Errorf("unknown command %q", name)}
 	}

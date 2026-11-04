@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/theme"
 )
 
 // Endpoint is everything a chat call needs for one selection.
@@ -247,6 +248,19 @@ func (c *Catalog) SaveSelection(model string) error {
 	}
 	c.home = model
 	return nil
+}
+
+// SaveTheme writes the theme key in ~/.co/config.yaml.
+// An isolated catalog leaves that file alone. A bad name is still an error.
+func (c *Catalog) SaveTheme(name string) error {
+	canonical, err := theme.Parse(name)
+	if err != nil {
+		return err
+	}
+	if c.isolated {
+		return nil
+	}
+	return savePlainKey(c.configFile, "theme", canonical)
 }
 
 func (c *Catalog) apiKey(p Provider) (string, error) {

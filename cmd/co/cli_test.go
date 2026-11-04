@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kevinjom/co/internal/config"
 	"github.com/kevinjom/co/internal/openai"
 	"github.com/kevinjom/co/internal/provider"
 	"github.com/kevinjom/co/internal/transcript"
@@ -72,6 +73,7 @@ func prepare(t *testing.T) {
 	t.Setenv("CO_MAX_TOOL_ROUNDS", "")
 	t.Setenv("CO_RESUME", "")
 	t.Setenv("CO_LIMIT", "")
+	t.Setenv("CO_THEME", "")
 	t.Chdir(t.TempDir())
 	viper.Reset()
 }
@@ -197,6 +199,59 @@ func TestMaxToolRoundsDefaultsTo64(t *testing.T) {
 	}
 	if viper.GetInt("max-tool-rounds") != 64 {
 		t.Fatalf("max-tool-rounds %d", viper.GetInt("max-tool-rounds"))
+	}
+}
+
+func TestThemeSetting(t *testing.T) {
+	prepare(t)
+	cmd, err := newRootCmd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	flag := cmd.Flags().Lookup("theme")
+	if flag == nil || flag.DefValue != "teal" {
+		t.Fatalf("flag %+v", flag)
+	}
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if config.Current().Theme != "teal" {
+		t.Fatalf("theme %q", config.Current().Theme)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeHomeFile(t, provider.HomeConfig(home), "theme: rose\n")
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if config.Current().Theme != "rose" {
+		t.Fatalf("theme %q", config.Current().Theme)
+	}
+
+	t.Setenv("CO_THEME", "sky")
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if config.Current().Theme != "sky" {
+		t.Fatalf("theme %q", config.Current().Theme)
+	}
+
+	t.Setenv("CO_THEME", "")
+	_, _, err = startCLI(t, "", "--theme", "ink")
+	var exitErr *exitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 {
+		t.Fatalf("err = %v", err)
+	}
+	if config.Current().Theme != "ink" {
+		t.Fatalf("theme %q", config.Current().Theme)
+	}
+
+	_, _, err = startCLI(t, "", "--theme", "nope")
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 || !strings.Contains(err.Error(), "theme") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -499,6 +554,32 @@ func TestSlashModelsIsNotATurn(t *testing.T) {
 	defer mu.Unlock()
 	if chats != 1 || chatModel != "test-model" {
 		t.Fatalf("chats=%d model=%q", chats, chatModel)
+	}
+}
+
+func TestThemeCommandSavesThePalette(t *testing.T) {
+	prepare(t)
+	writeOllamaConfig(t, "http://127.0.0.1:9", "test-model")
+	stdout, stderr, err := startCLI(t, "/theme\n/theme rose\n/theme nope\nexit\n", "--no-history")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout %q", stdout)
+	}
+	if !strings.Contains(stderr, "teal\n") || !strings.Contains(stderr, "theme rose\n") || !strings.Contains(stderr, "invalid theme") {
+		t.Fatalf("stderr %q", stderr)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := os.ReadFile(provider.HomeConfig(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), "theme: rose") {
+		t.Fatalf("config:\n%s", text)
 	}
 }
 

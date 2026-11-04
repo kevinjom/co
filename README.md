@@ -50,13 +50,14 @@ Providers live in YAML. A model is `provider/model-id`. The model id may contain
 
 ```yaml
 model: openrouter/qwen/qwen3-coder
+theme: teal
 log-level: info
 no-history: false
 clear-scrollback: false
 max-tool-rounds: 64
 ```
 
-`log-level` is `debug`, `info`, `warn`, or `error`. `no-history` skips the transcript. `clear-scrollback` erases the terminal scrollback before the TUI starts. `max-tool-rounds` is how many model calls in a turn may include tools. After that many, one more call is made with no tools. The default is 64. A flag or its environment variable wins over the file. `resume` is not read from the file.
+`theme` is the TUI palette: `teal`, `amber`, `rose`, `sky`, `violet`, or `ink`. The default is `teal`. Each palette has a light side and a dark side, and the TUI picks the side from the terminal background. `log-level` is `debug`, `info`, `warn`, or `error`. `no-history` skips the transcript. `clear-scrollback` erases the terminal scrollback before the TUI starts. `max-tool-rounds` is how many model calls in a turn may include tools. After that many, one more call is made with no tools. The default is 64. A flag or its environment variable wins over the file. `resume` is not read from the file.
 
 `~/.co/models.yaml` is the provider catalog:
 
@@ -92,7 +93,7 @@ providers:
 | `model` in `./.co.yaml` | Default model when the home file has none. |
 | `providers` in `~/.co/models.yaml` | Home providers. |
 | `providers` in `./.co.yaml` | Replaces the home provider with the same id. Other home providers stay. |
-| `log-level`, `no-history`, `clear-scrollback`, `max-tool-rounds` in `~/.co/config.yaml` | Defaults for those flags. |
+| `theme`, `log-level`, `no-history`, `clear-scrollback`, `max-tool-rounds` in `~/.co/config.yaml` | Defaults for those flags. |
 
 `--config path` uses that file alone for flags, providers, and the default model. It does not read `~/.co/config.yaml`, `~/.co/models.yaml`, or `./.co.yaml`, and `/models` does not write the home file. Keys still come from the environment and `~/.co/credentials.json`.
 
@@ -129,6 +130,7 @@ With no model selected, a terminal opens the model picker. Anything else exits a
 | `--no-history` | `CO_NO_HISTORY` | `no-history` | Do not write the transcript. |
 | `--clear-scrollback` | `CO_CLEAR_SCROLLBACK` | `clear-scrollback` | Erase the terminal scrollback before the TUI starts. Off unless set. |
 | `--max-tool-rounds` | `CO_MAX_TOOL_ROUNDS` | `max-tool-rounds` | Model calls that may include tools. Default 64. The next call has no tools. |
+| `--theme` | `CO_THEME` | `theme` | TUI palette: `teal`, `amber`, `rose`, `sky`, `violet`, or `ink`. Default `teal`. |
 
 `CO_` is the environment prefix, and `-` in a flag name becomes `_`.
 
@@ -142,11 +144,13 @@ With no model selected, a terminal opens the model picker. Anything else exits a
 | `/connect provider` | Save an API key for that provider. |
 | `/new` | Start another session in the TUI and show it. Other sessions keep running. |
 | `/sessions` | Switch the session on screen. In the TUI this opens a picker. |
+| `/theme` | List palettes. In the TUI this opens a picker. |
+| `/theme name` | Switch the palette. The choice is saved to `~/.co/config.yaml`, unless `--config` was set. |
 | `exit`, `quit` | Leave. When a transcript was written, `co` prints the id to resume. |
 
 `/new` and `/sessions` are TUI commands. The line reader keeps a single session.
 
-In the TUI, Tab completes `/models`, `/connect`, `/new`, and `/sessions`. Enter sends, Ctrl+J inserts a newline, and Ctrl+C quits. The transcript fills the terminal, with a session list on the right when the terminal is at least 60 columns wide. Each row is a status icon and the session title. The icon animates while that session is working. The list is only the sessions opened in this TUI. The mouse wheel, trackpad, PgUp, and PgDn scroll the transcript, and it stays pinned to the bottom until you scroll up. Ctrl+C during a turn stops that turn. Other sessions keep going. Ctrl+C while the session on screen is idle quits.
+In the TUI, Tab completes `/models`, `/connect`, `/new`, `/sessions`, and `/theme`. Enter sends, Ctrl+J inserts a newline, and Ctrl+C quits. The transcript fills the terminal, with a session list on the right when the terminal is at least 60 columns wide. Each row is a status icon and the session title. The icon animates while that session is working. The list is only the sessions opened in this TUI. The mouse wheel, trackpad, PgUp, and PgDn scroll the transcript, and it stays pinned to the bottom until you scroll up. Ctrl+C during a turn stops that turn. Other sessions keep going. Ctrl+C while the session on screen is idle quits.
 
 When stdin or stdout is not a terminal, the prompt is `> ` on stderr. The answer is written to stdout. Reasoning and tool lines go to stderr.
 

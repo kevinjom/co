@@ -11,6 +11,7 @@ import (
 	"github.com/kevinjom/co/internal/command"
 	"github.com/kevinjom/co/internal/config"
 	"github.com/kevinjom/co/internal/provider"
+	"github.com/kevinjom/co/internal/theme"
 	"github.com/kevinjom/co/internal/transcript"
 
 	"github.com/spf13/cobra"
@@ -38,6 +39,7 @@ func newRootCmd() (*cobra.Command, error) {
 	cmd.Flags().Bool("no-history", false, "do not save the session transcript")
 	cmd.Flags().Bool("clear-scrollback", false, "erase the terminal scrollback before the TUI starts")
 	cmd.Flags().Int("max-tool-rounds", config.DefaultMaxToolRounds, "model calls that may include tools")
+	cmd.Flags().String("theme", theme.Default, "TUI color theme ("+strings.Join(theme.Names(), ", ")+")")
 
 	if err := bindFlag(cmd.PersistentFlags(), "config"); err != nil {
 		return nil, err
@@ -58,6 +60,9 @@ func newRootCmd() (*cobra.Command, error) {
 		return nil, err
 	}
 	if err := bindFlag(cmd.Flags(), "max-tool-rounds"); err != nil {
+		return nil, err
+	}
+	if err := bindFlag(cmd.Flags(), "theme"); err != nil {
 		return nil, err
 	}
 
@@ -121,7 +126,7 @@ func initConfig(cmd *cobra.Command) error {
 }
 
 // setDefaultConfig prefers ~/.co/config.yaml and otherwise uses ./.co.yaml.
-// That file holds the default model, log-level, no-history, clear-scrollback, and max-tool-rounds.
+// That file holds the default model, theme, log-level, no-history, clear-scrollback, and max-tool-rounds.
 func setDefaultConfig(home string) error {
 	candidates := []string{
 		provider.HomeConfig(home),
@@ -227,5 +232,5 @@ func start(cmd *cobra.Command, modelOverride string) error {
 		}
 		fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 	}
-	return repl(cmd, signals, app, cwd, settings.ClearScrollback)
+	return repl(cmd, signals, app, cwd, settings.ClearScrollback, settings.Theme)
 }

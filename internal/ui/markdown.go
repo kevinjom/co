@@ -11,6 +11,7 @@ import (
 )
 
 type mdKey struct {
+	name  string
 	dark  bool
 	width int
 	muted bool
@@ -43,7 +44,7 @@ func (c *markdownCache) renderer(th theme, width int, muted bool) *glamour.TermR
 	if c.items == nil {
 		c.items = map[mdKey]*glamour.TermRenderer{}
 	}
-	key := mdKey{dark: th.dark, width: width, muted: muted}
+	key := mdKey{name: th.name, dark: th.dark, width: width, muted: muted}
 	if renderer, ok := c.items[key]; ok {
 		return renderer
 	}

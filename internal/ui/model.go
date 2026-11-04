@@ -79,6 +79,7 @@ const (
 	modeProviders
 	modeConnect
 	modeSessions
+	modeThemes
 )
 
 // model is the interactive session. The program takes the whole terminal.
@@ -125,11 +126,14 @@ type model struct {
 	exitErr       error
 }
 
-func newModel(ctx context.Context, session *agent.Session, modelName, cwd string) *model {
+func newModel(ctx context.Context, session *agent.Session, modelName, cwd, themeName string) *model {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	th := newTheme(true)
+	th, err := newTheme(themeName, true)
+	if err != nil {
+		panic(err)
+	}
 	m := &model{
 		tabs:      []tab{newTab(1, session)},
 		nextTab:   2,
@@ -242,9 +246,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.IsDark() == m.theme.dark {
 			return m, nil
 		}
-		m.theme = newTheme(msg.IsDark())
-		styleInput(&m.input, m.theme)
-		m.spin.Style = lipgloss.NewStyle().Foreground(m.theme.accentColor)
+		if err := m.applyTheme(m.theme.name, msg.IsDark()); err != nil {
+			return m, nil
+		}
 		m.layout()
 		m.paint()
 		return m, nil
@@ -315,7 +319,7 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.mode {
-	case modeModels, modeProviders, modeSessions:
+	case modeModels, modeProviders, modeSessions, modeThemes:
 		return m.onPickerKey(msg)
 	case modeConnect:
 		return m.onConnectKey(msg)
@@ -461,6 +465,12 @@ func (m *model) submit() tea.Cmd {
 	case command.KindSessions:
 		m.input.Reset()
 		return m.openSessions()
+	case command.KindTheme:
+		m.input.Reset()
+		if parsed.Arg == "" {
+			return m.openThemes()
+		}
+		return m.useTheme(parsed.Arg)
 	case command.KindError:
 		m.input.Reset()
 		m.addBlock(block{kind: blockError, text: parsed.Err.Error()})
@@ -792,7 +802,7 @@ func (m *model) addBlock(b block) {
 
 func (m *model) onWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	switch m.mode {
-	case modeModels, modeProviders, modeSessions:
+	case modeModels, modeProviders, modeSessions, modeThemes:
 		m.wheelPicker(msg.Button)
 		return m, nil
 	case modeConnect:
@@ -1062,14 +1072,14 @@ func waitPipe(p *turnPipe) tea.Cmd {
 
 // Run starts the interactive UI on the alternate screen.
 // When no model is selected yet, the model picker is open and esc quits.
-func Run(ctx context.Context, app Director, cwd string, clearScrollback bool) error {
+func Run(ctx context.Context, app Director, cwd string, clearScrollback bool, themeName string) error {
 	modelName := ""
 	var session *agent.Session
 	if app != nil && app.Ready() {
 		modelName = app.Model()
 		session = app.Session()
 	}
-	m := newModel(ctx, session, modelName, cwd)
+	m := newModel(ctx, session, modelName, cwd, themeName)
 	m.director = app
 	if app == nil || !app.Ready() {
 		m.mode = modeModels

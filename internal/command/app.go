@@ -8,6 +8,7 @@ import (
 
 	"github.com/kevinjom/co/internal/agent"
 	"github.com/kevinjom/co/internal/config"
+	"github.com/kevinjom/co/internal/lsp"
 	"github.com/kevinjom/co/internal/openai"
 	"github.com/kevinjom/co/internal/provider"
 	"github.com/kevinjom/co/internal/transcript"
@@ -30,6 +31,7 @@ type App struct {
 
 	running []running
 	model   string
+	lang    *lsp.Hub
 }
 
 // New starts an app that has no session until a model is activated.
@@ -38,6 +40,10 @@ func New(cat *provider.Catalog, home, cwd string, noHistory bool, maxToolRounds 
 	if maxToolRounds < 1 {
 		maxToolRounds = config.DefaultMaxToolRounds
 	}
+	lang := lsp.New(cwd)
+	if !lang.Available() {
+		slog.Info("language tools disabled", "reason", "no language server on PATH")
+	}
 	return &App{
 		cat:           cat,
 		home:          home,
@@ -45,6 +51,7 @@ func New(cat *provider.Catalog, home, cwd string, noHistory bool, maxToolRounds 
 		noHistory:     noHistory,
 		maxToolRounds: maxToolRounds,
 		running:       []running{},
+		lang:          lang,
 	}
 }
 
@@ -195,6 +202,11 @@ func (a *App) Close() {
 		}
 		a.running[i].history = nil
 	}
+	if a.lang != nil {
+		if err := a.lang.Close(); err != nil {
+			slog.Warn("closing language server", "err", err)
+		}
+	}
 }
 
 func (a *App) use(ctx context.Context, raw string, persist bool, target *agent.Session) error {
@@ -238,6 +250,9 @@ func (a *App) attach(client *openai.Client, wire, ref string) (*agent.Session, e
 func (a *App) newSession(client agent.Chatter, wire string, recorder agent.Recorder) *agent.Session {
 	session := agent.NewSession(client, wire, a.cwd, recorder)
 	session.SetMaxToolRounds(a.maxToolRounds)
+	if a.lang != nil && a.lang.Available() {
+		session.EnableLSP(a.lang)
+	}
 	return session
 }
 

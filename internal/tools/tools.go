@@ -40,6 +40,7 @@ type tool struct {
 // Set is the read-only tool surface for one working directory.
 type Set struct {
 	root  string
+	lang  Language
 	tools []tool
 }
 

@@ -93,7 +93,7 @@ func TestWelcomeDropsTheLogoWhenNarrow(t *testing.T) {
 	if strings.ContainsAny(plain, "█▀▄") {
 		t.Fatalf("logo should not fit: %q", plain)
 	}
-	if !strings.Contains(plain, "Ask about") || !strings.Contains(plain, "read-only") {
+	if !strings.Contains(plain, "Ask about") || !strings.Contains(plain, "edit files") {
 		t.Fatalf("caption missing: %q", plain)
 	}
 }

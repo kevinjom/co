@@ -76,8 +76,6 @@ func (m *model) statusLine() string {
 		left = m.theme.dim.Render("api key")
 	case !m.viewport.AtBottom():
 		left = m.theme.dim.Render("pgdn to follow")
-	default:
-		left = m.theme.dim.Render("read-only")
 	}
 	right := m.theme.dim.Render(m.modelName)
 	return joinSides(m.usableWidth(), left, right)
@@ -324,7 +322,7 @@ func (m *model) renderTranscript() string {
 	return strings.Join(parts, "\n\n") + "\n"
 }
 
-const welcomeCopy = "Ask about this directory. Tools are read-only.\n\nenter send  ·  ctrl+j newline  ·  @ finds a file"
+const welcomeCopy = "Ask about this directory. Tools can create and edit files here.\n\nenter send  ·  ctrl+j newline  ·  @ finds a file"
 
 // renderWelcome is the empty transcript. The mark sits above the caption
 // when the column can hold it, and the block is centered in the viewport
@@ -417,6 +415,10 @@ func toolLabel(name string) string {
 		return "List"
 	case "read_file":
 		return "Read"
+	case "create_file":
+		return "Create"
+	case "edit_file":
+		return "Edit"
 	case "grep":
 		return "Grep"
 	default:

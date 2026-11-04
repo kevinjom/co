@@ -7,7 +7,7 @@
 
 🚧 **Status:** actively under development and not stable. Interfaces, behavior, and the on-disk config may change without notice.
 
-`co` is a read-only coding assistant for the directory you start it in. It talks to OpenAI-compatible chat endpoints, and the model may list, read, and search files inside that directory. It cannot write files or leave the directory, including through symlinks.
+`co` is a coding assistant for the directory you start it in. It talks to OpenAI-compatible chat endpoints, and the model may list, read, search, create, and edit files inside that directory. It cannot leave the directory, including through symlinks.
 
 A terminal on both stdin and stdout gets a Bubble Tea TUI, which can hold more than one session. A pipe or a redirect gets a line reader with one session.
 
@@ -188,6 +188,8 @@ The model gets filesystem tools, jailed to the working directory, web search and
 | --- | --- |
 | `list_dir` | One directory level. Path defaults to `.`. |
 | `read_file` | A window of a text file. Defaults to 200 lines from line 1. |
+| `create_file` | Create a new file. Fails if the path already exists. |
+| `edit_file` | Replace one snippet that appears once. Other bytes stay as they are. |
 | `grep` | A Go regular expression. Skips `.git`. Returns at most 50 matches. |
 | `web_search` | DuckDuckGo search. Defaults to 8 results, at most 10. |
 | `web_fetch` | One http or https page, as Markdown. |
@@ -197,7 +199,7 @@ The model gets filesystem tools, jailed to the working directory, web search and
 | `lsp_symbols` | Symbols in one file (`path`) or a workspace search (`query`). |
 | `lsp_diagnostics` | Diagnostics for one file, or the workspace when `path` is omitted. |
 
-Paths are resolved, and a path that leaves the directory is rejected. Line and column start at 1. A language-server result may name a file outside the working directory, and it does not include that file's body. Edits, rename, formatting, and code actions are not tools.
+Paths are resolved, and a path that leaves the directory is rejected. `create_file` only creates a missing file. `edit_file` replaces one snippet that appears once. Line and column start at 1. A language-server result may name a file outside the working directory, and it does not include that file's body. Rename, formatting, and code actions are not tools.
 
 ## Test
 

@@ -1,4 +1,4 @@
-// Package tools exposes read-only tools.
+// Package tools exposes the model's tools.
 // Filesystem tools are jailed to one directory. Web tools search and fetch public pages.
 package tools
 
@@ -26,14 +26,14 @@ type tool struct {
 	run    runner
 }
 
-// Set is the read-only tool surface for one working directory.
+// Set is the tool surface for one working directory.
 type Set struct {
 	root  string
 	lang  Language
 	tools []tool
 }
 
-// New returns the tools that may read root.
+// New returns the tools for root.
 func New(root string) *Set {
 	set := &Set{
 		root: root,
@@ -42,6 +42,8 @@ func New(root string) *Set {
 		{schema: listDirSchema(), run: set.listDir},
 		{schema: readFileSchema(), run: set.readFile},
 		{schema: grepSchema(), run: set.grep},
+		{schema: createFileSchema(), run: set.createFile},
+		{schema: editFileSchema(), run: set.editFile},
 		{schema: webSearchSchema(), run: set.webSearch},
 		{schema: webFetchSchema(), run: set.webFetch},
 	}

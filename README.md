@@ -1,5 +1,10 @@
 # co
 
+<p>
+    <a href="docs/logo.svg"><img width="220" alt="co" src="docs/logo.svg"></a><br>
+</p>
+
+
 🚧 **Status:** actively under development and not stable. Interfaces, behavior, and the on-disk config may change without notice.
 
 `co` is a read-only coding assistant for the directory you start it in. It talks to OpenAI-compatible chat endpoints, and the model may list, read, and search files inside that directory. It cannot write files or leave the directory, including through symlinks.

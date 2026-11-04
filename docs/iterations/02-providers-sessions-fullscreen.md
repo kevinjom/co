@@ -183,7 +183,7 @@ The program takes the alternate screen (`AltScreen`), reports focus, and asks fo
 
 The transcript is a viewport with soft wrap, pinned to the bottom until the user scrolls up. The status line then says `pgdn to follow`. The mouse wheel and trackpad move one line. A wheel event over the composer goes to the textarea. PgUp and PgDn move a page. When the transcript is taller than the viewport, a one-column bar is drawn on the right: `┃` for the thumb, `│` for the track.
 
-The composer is one rounded box drawn outside the textarea. The border is teal while focused and zinc while not. The placeholder is `> Ask about this codebase`. Height is two to six lines. Enter sends. Ctrl+J, Alt+Enter, and Shift+Enter insert a newline. Ctrl+C quits, or cancels the turn while one is running. Ctrl+D quits when the input is empty and the session is idle.
+The composer is one rounded box drawn outside the textarea. The border is teal while focused and zinc while not. The placeholder is `what do you want to cook`. Height is two to six lines. Enter sends. Ctrl+J, Alt+Enter, and Shift+Enter insert a newline. Ctrl+C quits, or cancels the turn while one is running. Ctrl+D quits when the input is empty and the session is idle.
 
 ### What a block looks like
 

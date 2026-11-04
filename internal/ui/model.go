@@ -205,7 +205,7 @@ func historyBlocks(session *agent.Session) []block {
 func newInput(th theme) textarea.Model {
 	ta := textarea.New()
 	ta.Prompt = ""
-	ta.Placeholder = "> Ask about this codebase"
+	ta.Placeholder = "what do you want to cook"
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 64 * 1024
 	ta.MaxHeight = 6

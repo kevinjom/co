@@ -50,7 +50,7 @@ func TestViewFillsTheTerminal(t *testing.T) {
 	if !strings.Contains(plain, "enter send") || !strings.Contains(plain, "drag copy") {
 		t.Fatalf("help missing: %q", plain)
 	}
-	if !strings.Contains(plain, "> Ask about this codebase") {
+	if !strings.Contains(plain, "what do you want to cook") {
 		t.Fatalf("placeholder missing: %q", plain)
 	}
 	if strings.Count(plain, "╭") != 1 {

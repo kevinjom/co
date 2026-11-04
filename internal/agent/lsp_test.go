@@ -78,3 +78,25 @@ func TestToolDetailForLSP(t *testing.T) {
 		t.Fatalf("diagnostics %q", diagnostics)
 	}
 }
+
+func TestToolDetailForWeb(t *testing.T) {
+	search := ToolDetail(openai.ToolCall{
+		Function: openai.FunctionCall{
+			Name:      "web_search",
+			Arguments: openai.Arguments{"query": "golang http"},
+		},
+	})
+	if search != `query="golang http"` {
+		t.Fatalf("search %q", search)
+	}
+
+	fetch := ToolDetail(openai.ToolCall{
+		Function: openai.FunctionCall{
+			Name:      "web_fetch",
+			Arguments: openai.Arguments{"url": "https://go.dev"},
+		},
+	})
+	if fetch != "https://go.dev" {
+		t.Fatalf("fetch %q", fetch)
+	}
+}

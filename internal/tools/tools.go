@@ -1,4 +1,5 @@
-// Package tools exposes read-only filesystem tools jailed to one directory.
+// Package tools exposes read-only tools.
+// Filesystem tools are jailed to one directory. Web tools search and fetch public pages.
 package tools
 
 import (
@@ -41,6 +42,8 @@ func New(root string) *Set {
 		{schema: listDirSchema(), run: set.listDir},
 		{schema: readFileSchema(), run: set.readFile},
 		{schema: grepSchema(), run: set.grep},
+		{schema: webSearchSchema(), run: set.webSearch},
+		{schema: webFetchSchema(), run: set.webFetch},
 	}
 	return set
 }

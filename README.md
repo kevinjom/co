@@ -8,7 +8,7 @@ A terminal on both stdin and stdout gets a Bubble Tea TUI, which can hold more t
 
 ## Install
 
-Go 1.26 or newer.
+Go 1.26.4 or newer.
 
 ```sh
 go install github.com/kevinjom/co/cmd/co@latest
@@ -182,7 +182,7 @@ The model gets filesystem tools, jailed to the working directory, web search and
 | `list_dir` | One directory level. Path defaults to `.`. |
 | `read_file` | A window of a text file. Defaults to 200 lines from line 1. |
 | `grep` | A Go regular expression. Skips `.git`. Returns at most 50 matches. |
-| `web_search` | DuckDuckGo search. Returns at most 8 titles, URLs, and snippets. |
+| `web_search` | DuckDuckGo search. Defaults to 8 results, at most 10. |
 | `web_fetch` | One http or https page, as Markdown. |
 | `lsp_definition` | Definition of the symbol at a line and column. |
 | `lsp_references` | References to that symbol, including the declaration. |

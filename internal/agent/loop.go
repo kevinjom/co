@@ -249,7 +249,9 @@ func systemPrompt(cwd string, lsp bool) string {
 		"The working directory is " + cwd + ".",
 		"Answer questions about this codebase using tools.",
 		"When the user names a file, read it with read_file before answering.",
-		"Do not invent file contents or line counts.",
+		"Do not invent file contents, line counts, search results, or page contents.",
+		"Use web_search when the answer is not in this directory.",
+		"Use web_fetch to read one http or https page.",
 		"If a tool returns an error, say so.",
 		"When you have enough information, reply in plain text and stop calling tools.",
 	}
@@ -290,6 +292,15 @@ func ToolDetail(call openai.ToolCall) string {
 	case "grep":
 		pattern, _ := args["pattern"].(string)
 		return fmt.Sprintf("pattern=%q", pattern)
+	case "web_search":
+		query, _ := args["query"].(string)
+		return fmt.Sprintf("query=%q", query)
+	case "web_fetch":
+		raw, _ := args["url"].(string)
+		if strings.TrimSpace(raw) == "" {
+			return "url="
+		}
+		return raw
 	case "lsp_definition", "lsp_references", "lsp_hover":
 		return fmt.Sprintf("%s:%d:%d", detailPath(args), detailInt(args["line"]), detailInt(args["column"]))
 	case "lsp_symbols":

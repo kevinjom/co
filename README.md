@@ -1,5 +1,7 @@
 # co
 
+🚧 **Status:** actively under development and not stable. Interfaces, behavior, and the on-disk config may change without notice.
+
 `co` is a read-only coding assistant for the directory you start it in. It talks to OpenAI-compatible chat endpoints, and the model may list, read, and search files inside that directory. It cannot write files or leave the directory, including through symlinks.
 
 A terminal on both stdin and stdout gets a Bubble Tea TUI, which can hold more than one session. A pipe or a redirect gets a line reader with one session.
@@ -173,13 +175,15 @@ co session list --limit 5
 
 ## What the model can do
 
-The model gets filesystem tools, jailed to the working directory, and language-server tools when a server binary is on `PATH`. Today that is `gopls` for `.go` files. See [docs/lsp.md](docs/lsp.md).
+The model gets filesystem tools, jailed to the working directory, web search and page fetch, and language-server tools when a server binary is on `PATH`. Today that is `gopls` for `.go` files. See [docs/lsp.md](docs/lsp.md).
 
 | Tool | |
 | --- | --- |
 | `list_dir` | One directory level. Path defaults to `.`. |
 | `read_file` | A window of a text file. Defaults to 200 lines from line 1. |
 | `grep` | A Go regular expression. Skips `.git`. Returns at most 50 matches. |
+| `web_search` | DuckDuckGo search. Returns at most 8 titles, URLs, and snippets. |
+| `web_fetch` | One http or https page, as Markdown. |
 | `lsp_definition` | Definition of the symbol at a line and column. |
 | `lsp_references` | References to that symbol, including the declaration. |
 | `lsp_hover` | Hover text from the language server. |

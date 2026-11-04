@@ -111,6 +111,11 @@ func (a *App) Connect(id, key string) error {
 	return a.cat.SaveKey(id, key)
 }
 
+// SaveTheme stores the TUI palette. An isolated catalog leaves the settings file alone.
+func (a *App) SaveTheme(name string) error {
+	return a.cat.SaveTheme(name)
+}
+
 // RejectConnect is the usage error for /connect when stdin is not a terminal.
 func (a *App) RejectConnect(id string) error {
 	if err := a.cat.CanConnect(id); err != nil {

@@ -198,6 +198,24 @@ func setModel(doc *yaml.Node, model string) error {
 	return nil
 }
 
+// savePlainKey sets one unquoted string and leaves every other key in place.
+func savePlainKey(path, key, value string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("writing config %s: %w", path, err)
+	}
+	doc, mode, err := loadYAML(path)
+	if err != nil {
+		return err
+	}
+	root, err := mappingRoot(doc)
+	if err != nil {
+		return err
+	}
+	setNode(root, key, strNode(value, 0))
+	orderRoot(root)
+	return writeDoc(path, doc, mode)
+}
+
 func modelBlank(root *yaml.Node) bool {
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		if root.Content[i].Value != "model" {

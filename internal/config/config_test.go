@@ -29,7 +29,7 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Level != slog.LevelInfo || got.MaxToolRounds != DefaultMaxToolRounds || got.Limit != DefaultSessionLimit {
+	if got.Level != slog.LevelInfo || got.MaxToolRounds != DefaultMaxToolRounds || got.Limit != DefaultSessionLimit || got.Theme != DefaultTheme {
 		t.Fatalf("%+v", got)
 	}
 	if got.NoHistory || got.ClearScrollback || got.Resume != "" {
@@ -93,6 +93,18 @@ func TestLoadRejectsBadValues(t *testing.T) {
 	viper.Set("log-level", "loud")
 	_, err = Load()
 	if err == nil || !strings.Contains(err.Error(), "log-level") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestLoadRejectsTheme(t *testing.T) {
+	reset(t)
+	if err := Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	viper.Set("theme", "nope")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "theme") {
 		t.Fatalf("err = %v", err)
 	}
 }

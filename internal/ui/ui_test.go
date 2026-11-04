@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"image/color"
 	"strings"
 	"sync"
 	"testing"
@@ -21,7 +22,7 @@ func newTestModel(t *testing.T) *model {
 	t.Helper()
 	dir := t.TempDir()
 	session := agent.NewSession(openai.New("http://127.0.0.1:1"), "test-model", dir, nil)
-	m := newModel(context.Background(), session, "test-model", dir)
+	m := newModel(context.Background(), session, "test-model", dir, "")
 	m.width = 80
 	m.height = 24
 	m.layout()
@@ -352,15 +353,17 @@ func TestWrapKeepsExistingLines(t *testing.T) {
 }
 
 type fakeDirector struct {
-	models    []string
-	providers []string
-	picked    string
-	session   *agent.Session
-	selected  *agent.Session
-	opened    []*agent.Session
-	cwd       string
-	ready     bool
-	openErr   error
+	models       []string
+	providers    []string
+	picked       string
+	session      *agent.Session
+	selected     *agent.Session
+	opened       []*agent.Session
+	cwd          string
+	ready        bool
+	openErr      error
+	savedTheme   string
+	saveThemeErr error
 }
 
 func (f *fakeDirector) Models(context.Context) ([]string, error) { return f.models, nil }
@@ -388,10 +391,17 @@ func (f *fakeDirector) Open(context.Context) (*agent.Session, error) {
 func (f *fakeDirector) Providers() []string          { return f.providers }
 func (f *fakeDirector) CanConnect(string) error      { return nil }
 func (f *fakeDirector) Connect(string, string) error { return nil }
-func (f *fakeDirector) Model() string                { return f.picked }
-func (f *fakeDirector) Session() *agent.Session      { return f.session }
-func (f *fakeDirector) Ready() bool                  { return f.ready }
-func (f *fakeDirector) ExitNote() string             { return "" }
+func (f *fakeDirector) SaveTheme(name string) error {
+	if f.saveThemeErr != nil {
+		return f.saveThemeErr
+	}
+	f.savedTheme = name
+	return nil
+}
+func (f *fakeDirector) Model() string           { return f.picked }
+func (f *fakeDirector) Session() *agent.Session { return f.session }
+func (f *fakeDirector) Ready() bool             { return f.ready }
+func (f *fakeDirector) ExitNote() string        { return "" }
 
 func TestModelsCommandDoesNotStartATurn(t *testing.T) {
 	m := newTestModel(t)
@@ -630,7 +640,7 @@ func TestResumeRendersPriorTurns(t *testing.T) {
 		{Role: "tool", Content: "a.go", ToolCallID: "call-1"},
 		{Role: "assistant", Content: "There are 3 lines."},
 	})
-	m := newModel(context.Background(), session, "test-model", dir)
+	m := newModel(context.Background(), session, "test-model", dir, "")
 	m.width = 80
 	m.height = 24
 	m.layout()
@@ -1186,4 +1196,62 @@ func (g *gateChat) ChatStream(
 		onChunk(openai.StreamContent, "lo")
 	}
 	return openai.Message{Role: "assistant", Content: "hello"}, nil
+}
+
+func TestThemeSwitch(t *testing.T) {
+	m := newTestModel(t)
+	director := &fakeDirector{saveThemeErr: errors.New("disk full")}
+	m.director = director
+	if m.theme.name != "teal" || m.theme.accentHex != "#5EEAD4" {
+		t.Fatalf("default name %q accent %q", m.theme.name, m.theme.accentHex)
+	}
+
+	m.input.SetValue("/theme nope")
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if cmd != nil || got.theme.name != "teal" {
+		t.Fatalf("name %q cmd %v", got.theme.name, cmd != nil)
+	}
+	if !strings.Contains(ansi.Strip(got.renderTranscript()), "invalid theme") {
+		t.Fatal("missing invalid theme")
+	}
+
+	got.input.SetValue("/theme sky")
+	updated, cmd = got.Update(press(tea.KeyEnter, 0))
+	got = updated.(*model)
+	if cmd == nil || got.theme.name != "sky" || got.theme.accentHex != "#7DD3FC" || director.savedTheme != "" {
+		t.Fatalf("name %q accent %q saved %q", got.theme.name, got.theme.accentHex, director.savedTheme)
+	}
+	plain := ansi.Strip(got.renderTranscript())
+	if !strings.Contains(plain, "theme sky") || !strings.Contains(plain, "disk full") {
+		t.Fatalf("transcript %q", plain)
+	}
+
+	director.saveThemeErr = nil
+	got.input.SetValue("/theme")
+	updated, cmd = got.Update(press(tea.KeyEnter, 0))
+	got = updated.(*model)
+	if cmd != nil || got.mode != modeThemes {
+		t.Fatalf("mode %d cmd %v", got.mode, cmd != nil)
+	}
+	view := ansi.Strip(got.View().Content)
+	if !strings.Contains(view, "rose") || !strings.Contains(view, "choose a theme") {
+		t.Fatalf("picker %q", view)
+	}
+
+	updated, _ = got.Update(press(tea.KeyUp, 0))
+	updated, cmd = updated.Update(press(tea.KeyEnter, 0))
+	got = updated.(*model)
+	if cmd == nil || got.mode != modeChat || got.theme.name != "rose" || got.theme.accentHex != "#FB7185" {
+		t.Fatalf("name %q accent %q mode %d", got.theme.name, got.theme.accentHex, got.mode)
+	}
+	if director.savedTheme != "rose" {
+		t.Fatalf("saved %q", director.savedTheme)
+	}
+
+	updated, _ = got.Update(tea.BackgroundColorMsg{Color: color.RGBA{R: 255, G: 255, B: 255, A: 255}})
+	got = updated.(*model)
+	if got.theme.name != "rose" || got.theme.dark || got.theme.accentHex != "#BE123C" {
+		t.Fatalf("light name %q dark %v accent %q", got.theme.name, got.theme.dark, got.theme.accentHex)
+	}
 }

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"image/color"
 	"os"
 	"strings"
 
@@ -10,62 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
-
-type theme struct {
-	dark        bool
-	accent      lipgloss.Style
-	warn        lipgloss.Style
-	good        lipgloss.Style
-	dim         lipgloss.Style
-	bad         lipgloss.Style
-	accentColor color.Color
-	warnColor   color.Color
-	blurBorder  color.Color
-	faint       color.Color
-	textHex     string
-	accentHex   string
-	warnHex     string
-	faintHex    string
-	codeHex     string
-}
-
-func newTheme(dark bool) theme {
-	accentHex := pickHex(dark, "#0F766E", "#5EEAD4")
-	warnHex := pickHex(dark, "#B45309", "#FBBF24")
-	goodHex := pickHex(dark, "#15803D", "#86EFAC")
-	badHex := pickHex(dark, "#BE123C", "#FB7185")
-	faintHex := pickHex(dark, "#71717A", "#A1A1AA")
-	textHex := pickHex(dark, "#18181B", "#E4E4E7")
-	codeHex := pickHex(dark, "#C2410C", "#FDBA74")
-	blurHex := pickHex(dark, "#D4D4D8", "#3F3F46")
-	accent := lipgloss.Color(accentHex)
-	warn := lipgloss.Color(warnHex)
-	faint := lipgloss.Color(faintHex)
-	return theme{
-		dark:        dark,
-		accent:      lipgloss.NewStyle().Foreground(accent),
-		warn:        lipgloss.NewStyle().Foreground(warn),
-		good:        lipgloss.NewStyle().Foreground(lipgloss.Color(goodHex)),
-		dim:         lipgloss.NewStyle().Foreground(faint),
-		bad:         lipgloss.NewStyle().Foreground(lipgloss.Color(badHex)),
-		accentColor: accent,
-		warnColor:   warn,
-		blurBorder:  lipgloss.Color(blurHex),
-		faint:       faint,
-		textHex:     textHex,
-		accentHex:   accentHex,
-		warnHex:     warnHex,
-		faintHex:    faintHex,
-		codeHex:     codeHex,
-	}
-}
-
-func pickHex(dark bool, light, night string) string {
-	if dark {
-		return night
-	}
-	return light
-}
 
 func styleInput(ta *textarea.Model, th theme) {
 	styles := textarea.DefaultStyles(th.dark)
@@ -125,6 +68,8 @@ func (m *model) statusLine() string {
 		left = m.theme.dim.Render("choose a session")
 	case m.mode == modeProviders:
 		left = m.theme.dim.Render("choose a provider")
+	case m.mode == modeThemes:
+		left = m.theme.dim.Render("choose a theme")
 	case m.mode == modeConnect:
 		left = m.theme.dim.Render("api key")
 	case !m.viewport.AtBottom():
@@ -210,9 +155,9 @@ func (m *model) helpLine() string {
 		text = "enter queue  ·  esc recall  ·  ctrl+c stop"
 	case m.tab().busy:
 		text = "enter queue  ·  ctrl+j newline  ·  ctrl+c stop"
-	case (m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions) && m.session() == nil:
+	case (m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions || m.mode == modeThemes) && m.session() == nil:
 		text = "enter select  ·  esc quit  ·  up/down move"
-	case m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions:
+	case m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions || m.mode == modeThemes:
 		text = "enter select  ·  esc close  ·  up/down move"
 	case m.mode == modeConnect:
 		text = "enter save  ·  esc cancel"

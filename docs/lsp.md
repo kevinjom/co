@@ -41,7 +41,7 @@ Hover is the server's text, or `hover: empty`. Hover text longer than 8192 code 
 
 `lsp_symbols` with a query, and `lsp_diagnostics` with no path, have no file. Those call every row whose binary is on `PATH` and merge the lines, still capped at 50. Each of those lines starts with the binary's name, as in `gopls function Example main.go:1:1`. A file tool does not add that prefix.
 
-When the tools are on, the system prompt tells the model to prefer them over `grep` for definitions, references, and diagnostics. The transcript line for a position tool is `path:line:column`.
+When the tools are on, the system prompt tells the model to prefer them over `grep` for definitions, references, and diagnostics. For a file the user named, it says to `read_file` first, to use `lsp_symbols` or `lsp_diagnostics` for that file's symbols or diagnostics, and to use `lsp_definition`, `lsp_references`, or `lsp_hover` once a line and column are known. The transcript line for a position tool is `path:line:column`.
 
 ## Servers
 

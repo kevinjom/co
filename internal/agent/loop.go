@@ -248,6 +248,7 @@ func systemPrompt(cwd string, lsp bool) string {
 		"You are co, a read-only coding assistant.",
 		"The working directory is " + cwd + ".",
 		"Answer questions about this codebase using tools.",
+		"When the user names a file, read it with read_file before answering.",
 		"Do not invent file contents or line counts.",
 		"If a tool returns an error, say so.",
 		"When you have enough information, reply in plain text and stop calling tools.",
@@ -255,6 +256,8 @@ func systemPrompt(cwd string, lsp bool) string {
 	if lsp {
 		lines = append(lines,
 			"Prefer lsp_definition, lsp_references, lsp_hover, lsp_symbols, and lsp_diagnostics over grep for definitions, references, and diagnostics.",
+			"Use lsp_symbols or lsp_diagnostics when the question is about a named file's symbols or diagnostics.",
+			"Use lsp_definition, lsp_references, or lsp_hover once a line and column are known.",
 		)
 	}
 	return strings.Join(lines, "\n")

@@ -313,7 +313,7 @@ func (m *model) renderTranscript() string {
 	width := m.contentWidth()
 	blocks := m.tab().blocks
 	if len(blocks) == 0 {
-		return renderWelcome(width, m.theme)
+		return m.renderWelcome(width)
 	}
 	parts := make([]string, len(blocks))
 	for i, block := range blocks {
@@ -322,9 +322,23 @@ func (m *model) renderTranscript() string {
 	return strings.Join(parts, "\n\n") + "\n"
 }
 
-func renderWelcome(width int, th theme) string {
-	text := "Ask about this directory. Tools are read-only.\n\nenter sends  ·  ctrl+j adds a newline"
-	return th.dim.Render(wrapText(text, width))
+const welcomeCopy = "Ask about this directory. Tools are read-only.\n\nenter sends  ·  ctrl+j adds a newline"
+
+// renderWelcome is the empty transcript. The mark sits above the caption
+// when the column can hold it, and the block is centered in the viewport
+// so the bottom pin does not scroll it away.
+func (m *model) renderWelcome(width int) string {
+	caption := m.theme.dim.Render(wrapText(welcomeCopy, width))
+	mark := renderLogo(width)
+	if mark == "" {
+		return caption
+	}
+	body := mark + "\n\n" + caption
+	height := m.viewport.Height()
+	if width < 1 || height < lipgloss.Height(body) {
+		return caption
+	}
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, body)
 }
 
 func (m *model) renderBlock(block block, width int) string {

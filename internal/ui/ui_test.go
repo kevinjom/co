@@ -64,6 +64,102 @@ func TestViewFillsTheTerminal(t *testing.T) {
 	}
 }
 
+func TestWelcomeShowsTheLogo(t *testing.T) {
+	m := newTestModel(t)
+	raw := m.renderTranscript()
+	plain := ansi.Strip(raw)
+	if !strings.Contains(plain, "█") || !strings.Contains(plain, "Ask about this directory") {
+		t.Fatalf("welcome %q", plain)
+	}
+	if raw == plain {
+		t.Fatal("logo has no color")
+	}
+	if h := lipgloss.Height(raw); h != m.viewport.Height() {
+		t.Fatalf("welcome height %d viewport %d", h, m.viewport.Height())
+	}
+	ask := strings.Index(plain, "Ask about")
+	mark := strings.Index(plain, "█")
+	if ask < 0 || mark < 0 || mark > ask {
+		t.Fatalf("mark should sit above the caption: %q", plain)
+	}
+}
+
+func TestWelcomeDropsTheLogoWhenNarrow(t *testing.T) {
+	m := newTestModel(t)
+	m.width = 16
+	m.layout()
+	m.paint()
+	plain := ansi.Strip(m.renderTranscript())
+	if strings.ContainsAny(plain, "█▀▄") {
+		t.Fatalf("logo should not fit: %q", plain)
+	}
+	if !strings.Contains(plain, "Ask about") || !strings.Contains(plain, "read-only") {
+		t.Fatalf("caption missing: %q", plain)
+	}
+}
+
+func TestWelcomeDropsTheLogoWhenShort(t *testing.T) {
+	m := newTestModel(t)
+	m.height = 10
+	m.layout()
+	m.paint()
+	plain := ansi.Strip(m.renderTranscript())
+	if strings.ContainsAny(plain, "█▀▄") {
+		t.Fatalf("logo should not fit: %q", plain)
+	}
+	if !strings.Contains(plain, "Ask about") {
+		t.Fatalf("caption missing: %q", plain)
+	}
+}
+
+func TestLogoKeepsItsColors(t *testing.T) {
+	m := newTestModel(t)
+	before := logoLines(m.renderTranscript())
+	if before == "" || before == ansi.Strip(before) {
+		t.Fatalf("logo %q", before)
+	}
+	if err := m.applyTheme("rose", false); err != nil {
+		t.Fatal(err)
+	}
+	m.paint()
+	if after := logoLines(m.renderTranscript()); after != before {
+		t.Fatalf("logo followed the theme\nbefore %q\nafter %q", before, after)
+	}
+}
+
+func logoLines(raw string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.ContainsAny(ansi.Strip(line), "█▀▄") {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func TestLogoMarkOpensOnTheRight(t *testing.T) {
+	rows := rasterLogo(logoPixels)
+	mid := rows[len(rows)/2]
+	if mid[2] != logoBody || mid[len(mid)-3] == logoBody {
+		t.Fatalf("middle row %v", mid)
+	}
+	if rows[10][10] != logoEmpty {
+		t.Fatalf("center %v", rows[10][10])
+	}
+	ring := false
+	for _, row := range rows {
+		for _, ink := range row {
+			if ink == logoRing {
+				ring = true
+			}
+		}
+	}
+	if !ring {
+		t.Fatal("ring missing")
+	}
+}
+
 func TestForgetScrollback(t *testing.T) {
 	var buf strings.Builder
 	forgetScrollback(&buf, "iTerm.app")

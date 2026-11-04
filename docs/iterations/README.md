@@ -13,3 +13,4 @@ Name the new file `<seq>-<features>.md`, using the next sequence number. Put tha
 | --- | --- | --- | --- |
 | 01 | [Read-only streaming TUI](01-readonly-streaming-tui.md) | `2db263a3da4186384ccfab80bb7e336b3aac46cf` | show streamed reasoning in the tui |
 | 02 | [Providers, sessions, and a fullscreen transcript](02-providers-sessions-fullscreen.md) | `b745a2560c5627cab47f4723e4b9ed033b82fdd6` | generate session title |
+| 03 | [Sessions, language tools, and themes](03-sessions-tools-themes.md) | `9a1897f9ed3643b656a1c7d6f87e29e824555ddf` | feat: @ to trigger fuzzy search files |

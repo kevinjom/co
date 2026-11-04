@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kevinjom/co/internal/config"
+	"github.com/kevinjom/co/internal/logs"
 	"github.com/kevinjom/co/internal/openai"
 	"github.com/kevinjom/co/internal/provider"
 	"github.com/kevinjom/co/internal/transcript"
@@ -68,6 +69,7 @@ func prepare(t *testing.T) {
 	t.Setenv("CO_MODEL", "")
 	t.Setenv("OLLAMA_HOST", "")
 	t.Setenv("CO_LOG_LEVEL", "")
+	t.Setenv("CO_LOG_RETENTION_DAYS", "")
 	t.Setenv("CO_NO_HISTORY", "")
 	t.Setenv("CO_CLEAR_SCROLLBACK", "")
 	t.Setenv("CO_MAX_TOOL_ROUNDS", "")
@@ -92,6 +94,7 @@ func startCLI(t *testing.T, stdin string, args ...string) (string, string, error
 	cmd.SetErr(stderr)
 	cmd.SetIn(strings.NewReader(stdin))
 	cmd.SetArgs(args)
+	defer func() { _ = closeLogSink() }()
 	runErr := cmd.ExecuteContext(context.Background())
 	return stdout.String(), stderr.String(), runErr
 }
@@ -251,6 +254,70 @@ func TestThemeSetting(t *testing.T) {
 
 	_, _, err = startCLI(t, "", "--theme", "nope")
 	if !errors.As(err, &exitErr) || exitErr.Code != 2 || !strings.Contains(err.Error(), "theme") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestLogRetention(t *testing.T) {
+	prepare(t)
+	cmd, err := newRootCmd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Flags().Lookup("log-retention-days") != nil || cmd.PersistentFlags().Lookup("log-retention-days") != nil {
+		t.Fatal("log retention is a flag")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeHomeFile(t, provider.HomeConfig(home), "log-retention-days: 2\n")
+	dir := logs.Dir(home)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	yesterday := filepath.Join(dir, "co-"+now.AddDate(0, 0, -1).Format("2006-01-02")+".log")
+	older := filepath.Join(dir, "co-"+now.AddDate(0, 0, -2).Format("2006-01-02")+".log")
+	notes := filepath.Join(dir, "notes.txt")
+	for _, path := range []string{yesterday, older, notes} {
+		if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if config.Current().LogRetentionDays != 2 {
+		t.Fatalf("retention %d", config.Current().LogRetentionDays)
+	}
+	if _, err := os.Stat(older); !os.IsNotExist(err) {
+		t.Fatalf("older log %v", err)
+	}
+	if _, err := os.Stat(yesterday); err != nil {
+		t.Fatalf("yesterday %v", err)
+	}
+	if _, err := os.Stat(notes); err != nil {
+		t.Fatalf("notes %v", err)
+	}
+
+	t.Setenv("CO_LOG_RETENTION_DAYS", "1")
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if config.Current().LogRetentionDays != 1 {
+		t.Fatalf("retention %d", config.Current().LogRetentionDays)
+	}
+	if _, err := os.Stat(yesterday); !os.IsNotExist(err) {
+		t.Fatalf("yesterday %v", err)
+	}
+
+	t.Setenv("CO_LOG_RETENTION_DAYS", "0")
+	_, _, err = startCLI(t, "", "version")
+	var exitErr *exitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 2 || !strings.Contains(err.Error(), "log-retention-days") {
 		t.Fatalf("err = %v", err)
 	}
 }

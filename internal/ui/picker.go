@@ -362,7 +362,7 @@ func (m *model) onPaste(text string) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(tea.PasteMsg{Content: text})
 		m.layout()
-		return m, cmd
+		return m, tea.Batch(cmd, m.trackFiles())
 	default:
 		panic(fmt.Sprintf("unhandled input mode %d", m.mode))
 	}
@@ -483,7 +483,10 @@ func (m *model) inputView() string {
 func (m *model) overlayView() string {
 	switch m.mode {
 	case modeChat:
-		return m.commandOverlay()
+		if extra := m.commandOverlay(); extra != "" {
+			return extra
+		}
+		return m.fileOverlay()
 	case modeModels:
 		return m.choiceOverlay(!m.modelsLoaded, "loading models")
 	case modeProviders:
@@ -556,18 +559,18 @@ func (m *model) choiceLines(ids []string, cursor int) []string {
 	return lines
 }
 
-func pickerWindowSlice(ids []string, cursor int) (int, []string) {
-	if len(ids) <= pickerWindow {
-		return 0, ids
+func pickerWindowSlice[T any](items []T, cursor int) (int, []T) {
+	if len(items) <= pickerWindow {
+		return 0, items
 	}
 	start := cursor - pickerWindow/2
 	if start < 0 {
 		start = 0
 	}
-	if start+pickerWindow > len(ids) {
-		start = len(ids) - pickerWindow
+	if start+pickerWindow > len(items) {
+		start = len(items) - pickerWindow
 	}
-	return start, ids[start : start+pickerWindow]
+	return start, items[start : start+pickerWindow]
 }
 
 func typedText(msg tea.KeyPressMsg) (string, bool) {

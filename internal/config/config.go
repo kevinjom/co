@@ -17,6 +17,8 @@ import (
 const (
 	// DefaultLogLevel is the log level when log-level is unset.
 	DefaultLogLevel = "info"
+	// DefaultLogRetentionDays is how many daily log files to keep when log-retention-days is unset.
+	DefaultLogRetentionDays = 3
 	// DefaultMaxToolRounds is how many model calls may include tools when max-tool-rounds is unset.
 	// One more call is then made with no tools.
 	DefaultMaxToolRounds = 64
@@ -28,13 +30,14 @@ const (
 
 // Settings is the resolved process configuration.
 type Settings struct {
-	Level           slog.Level
-	NoHistory       bool
-	ClearScrollback bool
-	MaxToolRounds   int
-	Resume          string
-	Limit           int
-	Theme           string
+	Level            slog.Level
+	LogRetentionDays int
+	NoHistory        bool
+	ClearScrollback  bool
+	MaxToolRounds    int
+	Resume           string
+	Limit            int
+	Theme            string
 }
 
 type setting struct {
@@ -49,6 +52,7 @@ type setting struct {
 var settings = []setting{
 	{key: "model", env: "CO_MODEL"},
 	{key: "log-level", env: "CO_LOG_LEVEL", def: DefaultLogLevel, hasDefault: true},
+	{key: "log-retention-days", env: "CO_LOG_RETENTION_DAYS", def: DefaultLogRetentionDays, hasDefault: true},
 	{key: "resume", env: "CO_RESUME"},
 	{key: "no-history", env: "CO_NO_HISTORY", def: false, hasDefault: true},
 	{key: "clear-scrollback", env: "CO_CLEAR_SCROLLBACK", def: false, hasDefault: true},
@@ -83,6 +87,10 @@ func Load() (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
+	retention := viper.GetInt("log-retention-days")
+	if retention < 1 {
+		return Settings{}, fmt.Errorf("invalid log-retention-days %v", viper.Get("log-retention-days"))
+	}
 	rounds := viper.GetInt("max-tool-rounds")
 	if rounds < 1 {
 		return Settings{}, fmt.Errorf("invalid max-tool-rounds %v", viper.Get("max-tool-rounds"))
@@ -92,13 +100,14 @@ func Load() (Settings, error) {
 		return Settings{}, err
 	}
 	current = Settings{
-		Level:           level,
-		NoHistory:       viper.GetBool("no-history"),
-		ClearScrollback: viper.GetBool("clear-scrollback"),
-		MaxToolRounds:   rounds,
-		Resume:          strings.TrimSpace(viper.GetString("resume")),
-		Limit:           viper.GetInt("limit"),
-		Theme:           name,
+		Level:            level,
+		LogRetentionDays: retention,
+		NoHistory:        viper.GetBool("no-history"),
+		ClearScrollback:  viper.GetBool("clear-scrollback"),
+		MaxToolRounds:    rounds,
+		Resume:           strings.TrimSpace(viper.GetString("resume")),
+		Limit:            viper.GetInt("limit"),
+		Theme:            name,
 	}
 	return current, nil
 }

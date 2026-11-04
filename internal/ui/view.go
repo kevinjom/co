@@ -83,7 +83,7 @@ func (m *model) statusLine() string {
 	return joinSides(m.usableWidth(), left, right)
 }
 
-// aboveInputHeight is the command list and unsent queue drawn between the transcript and the box.
+// aboveInputHeight is the completion list and unsent queue drawn between the transcript and the box.
 func (m *model) aboveInputHeight() int {
 	height := 0
 	if extra := m.overlayView(); extra != "" {
@@ -151,6 +151,8 @@ func (m *model) queueLimit() int {
 func (m *model) helpLine() string {
 	text := "enter send  ·  ctrl+j newline  ·  drag copy  ·  wheel/pgup/pgdn scroll  ·  ctrl+c quit"
 	switch {
+	case m.filePickerArmed():
+		text = "up/down move  ·  tab insert  ·  enter insert  ·  esc close"
 	case m.tab().busy && strings.TrimSpace(m.input.Value()) != "":
 		text = "enter queue  ·  ctrl+c clear"
 	case m.tab().busy && len(m.tab().queue) > 0:
@@ -322,7 +324,7 @@ func (m *model) renderTranscript() string {
 	return strings.Join(parts, "\n\n") + "\n"
 }
 
-const welcomeCopy = "Ask about this directory. Tools are read-only.\n\nenter sends  ·  ctrl+j adds a newline"
+const welcomeCopy = "Ask about this directory. Tools are read-only.\n\nenter send  ·  ctrl+j newline  ·  @ finds a file"
 
 // renderWelcome is the empty transcript. The mark sits above the caption
 // when the column can hold it, and the block is centered in the viewport

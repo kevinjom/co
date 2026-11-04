@@ -29,7 +29,7 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Level != slog.LevelInfo || got.MaxToolRounds != DefaultMaxToolRounds || got.Limit != DefaultSessionLimit || got.Theme != DefaultTheme {
+	if got.Level != slog.LevelInfo || got.LogRetentionDays != DefaultLogRetentionDays || got.MaxToolRounds != DefaultMaxToolRounds || got.Limit != DefaultSessionLimit || got.Theme != DefaultTheme {
 		t.Fatalf("%+v", got)
 	}
 	if got.NoHistory || got.ClearScrollback || got.Resume != "" {
@@ -93,6 +93,43 @@ func TestLoadRejectsBadValues(t *testing.T) {
 	viper.Set("log-level", "loud")
 	_, err = Load()
 	if err == nil || !strings.Contains(err.Error(), "log-level") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestLogRetentionDays(t *testing.T) {
+	reset(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("log-retention-days: 5\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	viper.SetConfigFile(path)
+	if err := Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	if err := viper.ReadInConfig(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LogRetentionDays != 5 {
+		t.Fatalf("retention %d", got.LogRetentionDays)
+	}
+
+	t.Setenv("CO_LOG_RETENTION_DAYS", "2")
+	got, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LogRetentionDays != 2 {
+		t.Fatalf("retention %d", got.LogRetentionDays)
+	}
+
+	viper.Set("log-retention-days", 0)
+	_, err = Load()
+	if err == nil || !strings.Contains(err.Error(), "log-retention-days") {
 		t.Fatalf("err = %v", err)
 	}
 }

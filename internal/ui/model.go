@@ -108,6 +108,18 @@ type model struct {
 	secret        string
 	completeIndex int
 
+	// @ mention picker. fileDismiss hides one token until that token changes.
+	files        []string
+	filesLoading bool
+	filesReady   bool
+	filesErr     string
+	fileCursor   int
+	fileQuery    string
+	rankKey      string
+	ranked       bool
+	fileHits     []fileHit
+	fileDismiss  string
+
 	theme    theme
 	input    textarea.Model
 	viewport viewport.Model
@@ -220,7 +232,7 @@ func newInput(th theme) textarea.Model {
 }
 
 func (m *model) Init() tea.Cmd {
-	cmds := []tea.Cmd{tea.RequestBackgroundColor}
+	cmds := []tea.Cmd{tea.RequestBackgroundColor, m.loadFiles()}
 	if m.mode == modeModels {
 		cmds = append(cmds, m.fetchModels())
 	} else {
@@ -279,6 +291,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case modelsLoadedMsg:
 		return m.onModels(msg)
+
+	case filesLoadedMsg:
+		return m.onFiles(msg)
 
 	case selectDoneMsg:
 		return m.onSelected(msg)
@@ -377,6 +392,9 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.quit()
 	case "esc":
+		if m.dismissFiles() {
+			return m, nil
+		}
 		m.recallQueue()
 		return m, nil
 	case "pgup":
@@ -386,17 +404,29 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.viewport.PageDown()
 		return m, nil
 	case "up":
+		if m.moveFile(-1) {
+			return m, nil
+		}
 		if m.moveCommand(-1) {
 			return m, nil
 		}
 	case "down":
+		if m.moveFile(1) {
+			return m, nil
+		}
 		if m.moveCommand(1) {
 			return m, nil
 		}
 	case "enter", "ctrl+m":
+		if m.insertFile() {
+			return m, nil
+		}
 		m.acceptCommand()
 		return m, m.submit()
 	case "tab":
+		if m.insertFile() {
+			return m, nil
+		}
 		return m.completeCommand()
 	}
 
@@ -404,7 +434,7 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.layout()
-	return m, cmd
+	return m, tea.Batch(cmd, m.trackFiles())
 }
 
 func (m *model) moveCommand(delta int) bool {

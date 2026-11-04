@@ -23,7 +23,12 @@ func Execute() error {
 	if err != nil {
 		return err
 	}
-	return cmd.ExecuteContext(context.Background())
+	runErr := cmd.ExecuteContext(context.Background())
+	closeErr := closeLogSink()
+	if runErr != nil {
+		return runErr
+	}
+	return closeErr
 }
 
 func exitCode(err error) int {

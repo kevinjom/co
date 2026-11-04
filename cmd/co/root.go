@@ -3,13 +3,16 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/kevinjom/co/internal/command"
 	"github.com/kevinjom/co/internal/config"
+	"github.com/kevinjom/co/internal/logs"
 	"github.com/kevinjom/co/internal/provider"
 	"github.com/kevinjom/co/internal/theme"
 	"github.com/kevinjom/co/internal/transcript"
@@ -120,13 +123,50 @@ func initConfig(cmd *cobra.Command) error {
 	if _, err := config.Load(); err != nil {
 		return usageError(err)
 	}
-	handler := slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: config.Current().Level})
-	slog.SetDefault(slog.New(handler))
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("finding home directory: %w", err)
+	}
+	sink, err := logs.Open(home, config.Current().LogRetentionDays)
+	if err != nil {
+		return err
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(sink, &slog.HandlerOptions{
+		Level: config.Current().Level,
+	})))
+	setLogSink(sink)
 	return nil
 }
 
+var (
+	logSinkMu sync.Mutex
+	logSink   io.Closer
+)
+
+func setLogSink(next io.Closer) {
+	logSinkMu.Lock()
+	prev := logSink
+	logSink = next
+	logSinkMu.Unlock()
+	if prev != nil {
+		_ = prev.Close()
+	}
+}
+
+func closeLogSink() error {
+	logSinkMu.Lock()
+	prev := logSink
+	logSink = nil
+	logSinkMu.Unlock()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if prev == nil {
+		return nil
+	}
+	return prev.Close()
+}
+
 // setDefaultConfig prefers ~/.co/config.yaml and otherwise uses ./.co.yaml.
-// That file holds the default model, theme, log-level, no-history, clear-scrollback, and max-tool-rounds.
+// That file holds the default model, theme, log-level, log-retention-days, no-history, clear-scrollback, and max-tool-rounds.
 func setDefaultConfig(home string) error {
 	candidates := []string{
 		provider.HomeConfig(home),

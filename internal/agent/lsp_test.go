@@ -33,7 +33,7 @@ func (idleLanguage) Diagnostics(context.Context, string) (string, error) {
 func TestEnableLSPMentionsTools(t *testing.T) {
 	session := NewSession(openai.New("http://127.0.0.1:1"), "m", t.TempDir(), nil)
 	before := session.Messages()[0].Content
-	if !strings.Contains(before, "read it with read_file") || strings.Contains(before, "lsp_symbols") {
+	if !strings.Contains(before, "read it with read_file") || !strings.Contains(before, "create_file") || !strings.Contains(before, "edit_file") || strings.Contains(before, "lsp_symbols") {
 		t.Fatalf("prompt %q", before)
 	}
 	session.EnableLSP(idleLanguage{})

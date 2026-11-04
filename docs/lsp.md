@@ -1,6 +1,6 @@
 # Language servers
 
-`co` speaks the Language Server Protocol as a client. The model calls it the same way it calls `grep`. The assistant stays read-only: the server is asked for definitions, references, hover, symbols, and diagnostics. It is not asked to rename, format, or apply a code action.
+`co` speaks the Language Server Protocol as a client. The model calls it the same way it calls `grep`. The server is asked for definitions, references, hover, symbols, and diagnostics. It is not asked to rename, format, or apply a code action.
 
 The code lives in `internal/lsp`. `internal/tools` turns that client into tools. `internal/command.App` owns one hub and shares it with every session. `App.Close` shuts the servers down on the way out, which `cmd/co` already calls.
 
@@ -76,7 +76,7 @@ Before a request about a file, `co` reads that file from disk.
 - The first time, it sends `textDocument/didOpen` with the whole file and the row's language id.
 - If the bytes on disk differ from what the server already has, it sends one `textDocument/didChange` whose change has no range. A change without a range replaces the whole file.
 
-There is no incremental sync, so a later writer does not have to compute a diff. It saves the file inside the jail, and the next request takes the same path. That writer does not exist yet. The capability set is one function, `readOnlyCapabilities`, and a write mode is that function advertising `workspace.applyEdit` plus a handler that applies a `WorkspaceEdit` through the existing path jail.
+There is no incremental sync, so a later writer does not have to compute a diff. `create_file` and `edit_file` save the file inside the jail, and the next request takes the same path. The capability set is still `readOnlyCapabilities`. A mode that applies a `WorkspaceEdit` from the server would advertise `workspace.applyEdit` and handle that edit through the same jail.
 
 ## Paths
 
@@ -90,4 +90,4 @@ The server process is not jailed. `gopls` may read the module cache. Tool result
 
 ## What this does not do
 
-Rename, formatting, code actions, and applying edits are not tools. `co` does not write files, and it does not tell the server that it can apply a workspace edit.
+Rename, formatting, and code actions are not tools. `co` can create a file and replace one snippet in an existing file. It does not tell the server that it can apply a workspace edit.

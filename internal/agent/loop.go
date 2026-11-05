@@ -11,6 +11,7 @@ import (
 
 	"github.com/kevinjom/co/internal/config"
 	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/skill"
 	"github.com/kevinjom/co/internal/tools"
 )
 
@@ -42,6 +43,9 @@ type Session struct {
 	messages      []openai.Message
 	recorder      Recorder
 	maxToolRounds int
+	catalog       *skill.Catalog
+	active        []string
+	lsp           bool
 	titleWG       sync.WaitGroup
 	titleMu       sync.Mutex
 	title         string
@@ -60,8 +64,17 @@ func NewSession(client Chatter, model, cwd string, recorder Recorder) *Session {
 		defs:          toolDefinitions(set),
 		recorder:      recorder,
 		maxToolRounds: config.DefaultMaxToolRounds,
+		active:        []string{},
 		messages: []openai.Message{
-			{Role: "system", Content: systemPrompt(cwd, false)},
+			{
+				Role: "system",
+				Content: systemPrompt(
+					cwd,
+					false,
+					nil,
+					nil,
+				),
+			},
 		},
 	}
 }
@@ -74,9 +87,8 @@ func (s *Session) EnableLSP(lang tools.Language) {
 	}
 	s.tools.EnableLSP(lang)
 	s.defs = toolDefinitions(s.tools)
-	if len(s.messages) > 0 && s.messages[0].Role == "system" {
-		s.messages[0].Content = systemPrompt(s.cwd, true)
-	}
+	s.lsp = true
+	s.refreshPrompt()
 }
 
 // SetMaxToolRounds sets how many model calls in a turn may include tools.
@@ -132,6 +144,8 @@ func (s *Session) Reply(ctx context.Context, lines []string, observe Observer) (
 	if len(lines) == 0 {
 		return "", nil
 	}
+	s.applyTurnSkills(lines)
+	defer s.clearTurnSkills()
 	first := !hasUserMessage(s.messages)
 	for _, line := range lines {
 		s.remember(openai.Message{Role: "user", Content: line}, false)

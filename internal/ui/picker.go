@@ -161,6 +161,27 @@ func (m *model) useTheme(name string) tea.Cmd {
 	return m.input.Focus()
 }
 
+func (m *model) openSkills() tea.Cmd {
+	m.mode = modeSkills
+	m.filter = ""
+	m.pickerErr = ""
+	m.cursor = 0
+	m.layout()
+	m.paint()
+	return nil
+}
+
+func (m *model) insertSkillName(name string) tea.Cmd {
+	m.mode = modeChat
+	m.filter = ""
+	m.pickerErr = ""
+	next := "/" + name + " "
+	setCaret(&m.input, next, len([]rune(next)))
+	m.layout()
+	m.paint()
+	return m.input.Focus()
+}
+
 func (m *model) openProviders() tea.Cmd {
 	if m.director == nil {
 		m.addBlock(block{kind: blockError, text: "connect is unavailable"})
@@ -236,6 +257,8 @@ func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.beginConnect(ids[m.cursor])
 		case modeThemes:
 			return m, m.useTheme(ids[m.cursor])
+		case modeSkills:
+			return m, m.insertSkillName(ids[m.cursor])
 		default:
 			panic(fmt.Sprintf("unhandled input mode %d", m.mode))
 		}
@@ -345,7 +368,7 @@ func (m *model) onPaste(text string) (tea.Model, tea.Cmd) {
 		m.pickerErr = ""
 		m.paint()
 		return m, nil
-	case modeModels, modeProviders, modeSessions, modeThemes:
+	case modeModels, modeProviders, modeSessions, modeThemes, modeSkills:
 		line, _, _ := strings.Cut(text, "\n")
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -431,6 +454,8 @@ func (m *model) pickerIDs() []string {
 		ids = m.providerIDs
 	case modeThemes:
 		ids = palette.Names()
+	case modeSkills:
+		ids = m.skillNames()
 	default:
 		return []string{}
 	}
@@ -460,6 +485,11 @@ func (m *model) emptyListText() string {
 		return "no matching provider"
 	case modeThemes:
 		return "no matching theme"
+	case modeSkills:
+		if len(m.skillNames()) == 0 {
+			return "no skills"
+		}
+		return "no matching skill"
 	default:
 		return "no matching model"
 	}
@@ -469,7 +499,7 @@ func (m *model) inputView() string {
 	switch m.mode {
 	case modeChat:
 		return inputChrome(m.input.Focused(), m.theme).Render(m.input.View())
-	case modeModels, modeProviders, modeSessions, modeThemes:
+	case modeModels, modeProviders, modeSessions, modeThemes, modeSkills:
 		return m.theme.dim.Render(ansi.Truncate("filter: "+m.filter, m.usableWidth(), "…"))
 	case modeConnect:
 		dots := strings.Repeat("•", len([]rune(m.secret)))
@@ -494,6 +524,8 @@ func (m *model) overlayView() string {
 	case modeSessions:
 		return m.sessionOverlay()
 	case modeThemes:
+		return m.choiceOverlay(false, "")
+	case modeSkills:
 		return m.choiceOverlay(false, "")
 	case modeConnect:
 		if m.pickerErr == "" {

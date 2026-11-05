@@ -107,7 +107,7 @@ func lineRepl(cmd *cobra.Command, signals *signalSession, app *command.App) erro
 func runLineCommand(cmd *cobra.Command, signals *signalSession, app *command.App, line string) (bool, error) {
 	in := cmd.InOrStdin()
 	interactive := isTerminal(in)
-	parsed := command.Parse(line)
+	parsed := command.Parse(line, skillNames(app))
 	stderr := cmd.ErrOrStderr()
 	switch parsed.Kind {
 	case command.KindChat:
@@ -140,6 +140,18 @@ func runLineCommand(cmd *cobra.Command, signals *signalSession, app *command.App
 			return true, nil
 		}
 		fmt.Fprintf(stderr, "theme %s\n", name)
+		return true, nil
+	case command.KindSkill:
+		if parsed.Arg != "" {
+			return false, nil
+		}
+		skills := app.Skills()
+		if len(skills) == 0 {
+			fmt.Fprintln(stderr, "no skills")
+		}
+		for _, sk := range skills {
+			fmt.Fprintf(stderr, "%s: %s\n", sk.Name, oneLine(sk.Description))
+		}
 		return true, nil
 	case command.KindModels:
 		if parsed.Arg == "" {
@@ -197,6 +209,22 @@ func runLineCommand(cmd *cobra.Command, signals *signalSession, app *command.App
 }
 
 var errQuit = errors.New("quit")
+
+func skillNames(app *command.App) []string {
+	if app == nil {
+		return []string{}
+	}
+	list := app.Skills()
+	names := make([]string, 0, len(list))
+	for _, sk := range list {
+		names = append(names, sk.Name)
+	}
+	return names
+}
+
+func oneLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
 
 func readSecret(r io.Reader) (string, error) {
 	file, ok := r.(*os.File)

@@ -11,6 +11,7 @@ import (
 	"github.com/kevinjom/co/internal/lsp"
 	"github.com/kevinjom/co/internal/openai"
 	"github.com/kevinjom/co/internal/provider"
+	"github.com/kevinjom/co/internal/skill"
 	"github.com/kevinjom/co/internal/transcript"
 )
 
@@ -32,6 +33,7 @@ type App struct {
 	running []running
 	model   string
 	lang    *lsp.Hub
+	skills  *skill.Catalog
 }
 
 // New starts an app that has no session until a model is activated.
@@ -52,6 +54,7 @@ func New(cat *provider.Catalog, home, cwd string, noHistory bool, maxToolRounds 
 		maxToolRounds: maxToolRounds,
 		running:       []running{},
 		lang:          lang,
+		skills:        skill.Load(cwd, home),
 	}
 }
 
@@ -254,11 +257,20 @@ func (a *App) attach(client *openai.Client, wire, ref string) (*agent.Session, e
 
 func (a *App) newSession(client agent.Chatter, wire string, recorder agent.Recorder) *agent.Session {
 	session := agent.NewSession(client, wire, a.cwd, recorder)
+	session.SetCatalog(a.skills)
 	session.SetMaxToolRounds(a.maxToolRounds)
 	if a.lang != nil && a.lang.Available() {
 		session.EnableLSP(a.lang)
 	}
 	return session
+}
+
+// Skills returns the skills found at startup, in name order.
+func (a *App) Skills() []skill.Skill {
+	if a == nil || a.skills == nil {
+		return []skill.Skill{}
+	}
+	return a.skills.List()
 }
 
 func (a *App) indexOf(session *agent.Session) int {

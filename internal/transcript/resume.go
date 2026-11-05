@@ -37,6 +37,7 @@ type Loaded struct {
 	Model    string
 	Title    string
 	Messages []openai.Message
+	Skills   []string
 }
 
 // Resume opens home/.co/projects/<project>/sessions/<id>.jsonl for appending.
@@ -116,6 +117,7 @@ func Resume(home, cwd, id string) (*Loaded, error) {
 		Model:    parsed.model,
 		Title:    title,
 		Messages: parsed.messages,
+		Skills:   parsed.skills,
 	}, nil
 }
 
@@ -124,6 +126,7 @@ type parsedSession struct {
 	model       string
 	title       string
 	messages    []openai.Message
+	skills      []string
 	seq         int
 	kept        int
 }
@@ -160,6 +163,7 @@ func parseSession(id, cwd string, raw []byte) (parsedSession, error) {
 		headerModel: header.Model,
 		model:       header.Model,
 		messages:    []openai.Message{},
+		skills:      []string{},
 		kept:        len(kept),
 	}
 	for i, line := range lines[1:] {
@@ -219,6 +223,16 @@ func applyRecord(line []byte, parsed *parsedSession) (parsedSession, error) {
 			return parsedSession{}, fmt.Errorf("title is empty")
 		}
 		next.title = rec.Title
+		return next, nil
+	case "skill":
+		var rec skillRecord
+		if err := json.Unmarshal(line, &rec); err != nil {
+			return parsedSession{}, err
+		}
+		if strings.TrimSpace(rec.Name) == "" {
+			return parsedSession{}, fmt.Errorf("skill name is empty")
+		}
+		next.skills = append(next.skills, rec.Name)
 		return next, nil
 	default:
 		return parsedSession{}, fmt.Errorf("unknown record %q", kind.Type)

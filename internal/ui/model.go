@@ -80,6 +80,7 @@ const (
 	modeConnect
 	modeSessions
 	modeThemes
+	modeSkills
 )
 
 // model is the interactive session. The program takes the whole terminal.
@@ -358,7 +359,7 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.mode {
-	case modeModels, modeProviders, modeSessions, modeThemes:
+	case modeModels, modeProviders, modeSessions, modeThemes, modeSkills:
 		return m.onPickerKey(msg)
 	case modeConnect:
 		return m.onConnectKey(msg)
@@ -421,10 +422,16 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.insertFile() {
 			return m, nil
 		}
+		if m.insertSkill() {
+			return m, nil
+		}
 		m.acceptCommand()
 		return m, m.submit()
 	case "tab":
 		if m.insertFile() {
+			return m, nil
+		}
+		if m.insertSkill() {
 			return m, nil
 		}
 		return m.completeCommand()
@@ -438,7 +445,7 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) moveCommand(delta int) bool {
-	done := command.Complete(m.input.Value(), m.completeIndex)
+	done := m.completion(m.input.Value())
 	if done.Value == "" {
 		return false
 	}
@@ -459,13 +466,47 @@ func (m *model) completeCommand() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *model) insertSkillArmed() bool {
+	if m.mode != modeChat {
+		return false
+	}
+	return m.skillCompletion() != ""
+}
+
+// insertSkill writes /name and a trailing space, the same way @ inserts a path.
+// The line stays in the box so the user can type the rest of the turn.
+func (m *model) insertSkill() bool {
+	name := m.skillCompletion()
+	if name == "" {
+		return false
+	}
+	next := name + " "
+	setCaret(&m.input, next, len([]rune(next)))
+	m.completeIndex = 0
+	m.layout()
+	return true
+}
+
+func (m *model) skillCompletion() string {
+	value := m.input.Value()
+	atEnd := m.input.Line() == 0 && !strings.Contains(value, "\n") && m.input.Column() == len([]rune(value))
+	if !atEnd {
+		return ""
+	}
+	done := m.completion(value)
+	if done.Value == "" || !done.IsSkill(done.Value) {
+		return ""
+	}
+	return done.Value
+}
+
 func (m *model) acceptCommand() bool {
 	value := m.input.Value()
 	atEnd := m.input.Line() == 0 && !strings.Contains(value, "\n") && m.input.Column() == len([]rune(value))
 	if !atEnd {
 		return false
 	}
-	done := command.Complete(value, m.completeIndex)
+	done := m.completion(value)
 	if done.Value == "" {
 		return false
 	}
@@ -478,15 +519,59 @@ func (m *model) stopComplete() {
 	m.completeIndex = 0
 }
 
+func (m *model) skillNames() []string {
+	if m.director == nil {
+		return []string{}
+	}
+	list := m.director.Skills()
+	names := make([]string, 0, len(list))
+	for _, sk := range list {
+		names = append(names, sk.Name)
+	}
+	return names
+}
+
+func (m *model) completion(stem string) command.Completion {
+	return command.Complete(stem, m.completeIndex, m.skillNames())
+}
+
 func (m *model) commandOverlay() string {
 	if m.mode != modeChat {
 		return ""
 	}
-	done := command.Complete(m.input.Value(), m.completeIndex)
+	done := m.completion(m.input.Value())
 	if done.Value == "" {
 		return ""
 	}
-	return strings.Join(m.choiceLines(done.Matches, done.Index), "\n")
+	return strings.Join(m.commandLines(done), "\n")
+}
+
+func (m *model) commandLines(done command.Completion) []string {
+	width := m.usableWidth()
+	start, view := pickerWindowSlice(done.Matches, done.Index)
+	end := start + len(view)
+	lines := []string{}
+	flat := 0
+	for _, group := range done.Groups {
+		shown := false
+		for _, name := range group.Matches {
+			if flat >= start && flat < end {
+				if !shown {
+					lines = append(lines, m.theme.dim.Render(ansi.Truncate(group.Heading, width, "…")))
+					shown = true
+				}
+				prefix := "  "
+				style := m.theme.dim
+				if flat == done.Index {
+					prefix = "> "
+					style = m.theme.accent
+				}
+				lines = append(lines, style.Render(ansi.Truncate(prefix+name, width, "…")))
+			}
+			flat++
+		}
+	}
+	return lines
 }
 
 func (m *model) submit() tea.Cmd {
@@ -495,7 +580,7 @@ func (m *model) submit() tea.Cmd {
 	if text == "" {
 		return nil
 	}
-	parsed := command.Parse(text)
+	parsed := command.Parse(text, m.skillNames())
 	switch parsed.Kind {
 	case command.KindQuit:
 		m.explainResume = true
@@ -525,6 +610,12 @@ func (m *model) submit() tea.Cmd {
 			return m.openThemes()
 		}
 		return m.useTheme(parsed.Arg)
+	case command.KindSkill:
+		m.input.Reset()
+		if parsed.Arg == "" {
+			return m.openSkills()
+		}
+		return m.insertSkillName(parsed.Arg)
 	case command.KindError:
 		m.input.Reset()
 		m.addBlock(block{kind: blockError, text: parsed.Err.Error()})
@@ -857,7 +948,7 @@ func (m *model) addBlock(b block) {
 func (m *model) onWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	m.clearSelection()
 	switch m.mode {
-	case modeModels, modeProviders, modeSessions, modeThemes:
+	case modeModels, modeProviders, modeSessions, modeThemes, modeSkills:
 		m.wheelPicker(msg.Button)
 		return m, nil
 	case modeConnect:

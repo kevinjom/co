@@ -66,6 +66,14 @@ type titleRecord struct {
 	Title string `json:"title"`
 }
 
+type skillRecord struct {
+	Type string `json:"type"`
+	V    int    `json:"v"`
+	Seq  int    `json:"seq"`
+	TS   string `json:"ts"`
+	Name string `json:"name"`
+}
+
 // Open prepares a session file under home/.co/projects/<project>/sessions.
 // home is the user home directory. cwd is the project directory.
 func Open(home, cwd, model string) (*Writer, error) {
@@ -174,6 +182,26 @@ func (w *Writer) RecordModel(model string) error {
 			Seq:   seq,
 			TS:    time.Now().UTC().Format(time.RFC3339Nano),
 			Model: model,
+		}
+	})
+}
+
+// RecordSkill appends the name of a skill activated in this session.
+// The file is created on this write when nothing has been stored yet.
+func (w *Writer) RecordSkill(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("session history: skill name is empty")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writeRecord(func(seq int) any {
+		return skillRecord{
+			Type: "skill",
+			V:    version,
+			Seq:  seq,
+			TS:   time.Now().UTC().Format(time.RFC3339Nano),
+			Name: name,
 		}
 	})
 }

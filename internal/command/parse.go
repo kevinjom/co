@@ -17,6 +17,7 @@ const (
 	KindNew
 	KindSessions
 	KindTheme
+	KindSkill
 	KindError
 )
 
@@ -33,19 +34,22 @@ const (
 	cmdNew      = "/new"
 	cmdSessions = "/sessions"
 	cmdTheme    = "/theme"
+	cmdSkill    = "/skill"
 )
 
 func slashCommands() []string {
-	return []string{cmdModels, cmdConnect, cmdNew, cmdSessions, cmdTheme}
+	return []string{cmdModels, cmdConnect, cmdNew, cmdSessions, cmdTheme, cmdSkill}
 }
 
 // Parse classifies a line before it can become a chat turn.
+// skills are names without the leading slash. /skill lists them.
+// A line that names a skill, such as /grilling or /skill grilling, is a chat turn.
 // /models and /models <provider>/<model-id> select a model.
 // /connect lists providers that accept a key. /connect <provider> skips that list.
 // /new starts another session. /sessions lists the open ones.
 // /theme lists palettes. /theme <name> selects one.
 // exit and quit leave the session.
-func Parse(line string) Parsed {
+func Parse(line string, skills []string) Parsed {
 	line = strings.TrimSpace(line)
 	switch line {
 	case "exit", "quit":
@@ -80,7 +84,32 @@ func Parse(line string) Parsed {
 			return Parsed{Kind: KindError, Err: errors.New("usage: /theme [name]")}
 		}
 		return Parsed{Kind: KindTheme, Arg: arg}
+	case cmdSkill:
+		if arg == "" {
+			return Parsed{Kind: KindSkill}
+		}
+		skillName := strings.Fields(arg)[0]
+		if _, ok := knownSkill("/"+skillName, skills); !ok {
+			return Parsed{Kind: KindError, Err: fmt.Errorf("unknown skill %q", skillName)}
+		}
+		return Parsed{Kind: KindChat, Arg: line}
 	default:
+		if _, ok := knownSkill(name, skills); ok {
+			return Parsed{Kind: KindChat, Arg: line}
+		}
 		return Parsed{Kind: KindError, Err: fmt.Errorf("unknown command %q", name)}
 	}
+}
+
+func knownSkill(command string, skills []string) (string, bool) {
+	name := strings.TrimPrefix(command, "/")
+	if name == "" || name == command {
+		return "", false
+	}
+	for _, skillName := range skills {
+		if skillName == name {
+			return skillName, true
+		}
+	}
+	return "", false
 }

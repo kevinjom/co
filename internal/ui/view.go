@@ -72,6 +72,8 @@ func (m *model) statusLine() string {
 		left = m.theme.dim.Render("choose a provider")
 	case m.mode == modeThemes:
 		left = m.theme.dim.Render("choose a theme")
+	case m.mode == modeSkills:
+		left = m.theme.dim.Render("choose a skill")
 	case m.mode == modeConnect:
 		left = m.theme.dim.Render("api key")
 	case !m.viewport.AtBottom():
@@ -157,12 +159,18 @@ func (m *model) helpLine() string {
 		text = "enter queue  ·  esc recall  ·  ctrl+c stop"
 	case m.tab().busy:
 		text = "enter queue  ·  ctrl+j newline  ·  ctrl+c stop"
+	case m.mode == modeSkills && m.session() == nil:
+		text = "enter insert  ·  esc quit  ·  up/down move"
+	case m.mode == modeSkills:
+		text = "enter insert  ·  esc close  ·  up/down move"
 	case (m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions || m.mode == modeThemes) && m.session() == nil:
 		text = "enter select  ·  esc quit  ·  up/down move"
 	case m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions || m.mode == modeThemes:
 		text = "enter select  ·  esc close  ·  up/down move"
 	case m.mode == modeConnect:
 		text = "enter save  ·  esc cancel"
+	case m.insertSkillArmed():
+		text = "up/down move  ·  tab insert  ·  enter insert"
 	case m.commandOverlay() != "":
 		text = "up/down move  ·  tab complete  ·  enter select"
 	}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/kevinjom/co/internal/agent"
 	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/skill"
 )
 
 func newTestModel(t *testing.T) *model {
@@ -460,6 +461,7 @@ type fakeDirector struct {
 	openErr      error
 	savedTheme   string
 	saveThemeErr error
+	skills       []skill.Skill
 }
 
 func (f *fakeDirector) Models(context.Context) ([]string, error) { return f.models, nil }
@@ -494,6 +496,7 @@ func (f *fakeDirector) SaveTheme(name string) error {
 	f.savedTheme = name
 	return nil
 }
+func (f *fakeDirector) Skills() []skill.Skill   { return f.skills }
 func (f *fakeDirector) Model() string           { return f.picked }
 func (f *fakeDirector) Session() *agent.Session { return f.session }
 func (f *fakeDirector) Ready() bool             { return f.ready }
@@ -647,6 +650,52 @@ func TestTabCompletesSlashCommands(t *testing.T) {
 	got = updated.(*model)
 	if got.input.Value() != "/connectx" {
 		t.Fatalf("typed %q", got.input.Value())
+	}
+}
+
+func TestSlashListGroupsSkills(t *testing.T) {
+	m := newTestModel(t)
+	m.director = &fakeDirector{
+		skills: []skill.Skill{{
+			Name:        "grilling",
+			Description: "Grill a plan.",
+		}},
+	}
+	m.input.SetValue("/")
+	m.layout()
+	plain := ansi.Strip(m.View().Content)
+	for _, want := range []string{"commands", "> /models", "/skill", "skills", "/grilling"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("missing %q in %q", want, plain)
+		}
+	}
+}
+
+func TestSkillCommandInsertsTheName(t *testing.T) {
+	m := newTestModel(t)
+	m.director = &fakeDirector{
+		session: m.tab().session,
+		ready:   true,
+		skills: []skill.Skill{{
+			Name:        "grilling",
+			Description: "Grill a plan.",
+		}},
+	}
+	m.input.SetValue("/g")
+	updated, _ := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if got.tab().busy {
+		t.Fatal("skill command started a turn")
+	}
+	if got.input.Value() != "/grilling " {
+		t.Fatalf("value %q", got.input.Value())
+	}
+	if got.input.Column() != len([]rune(got.input.Value())) {
+		t.Fatalf("column %d", got.input.Column())
+	}
+	plain := ansi.Strip(got.renderTranscript())
+	if strings.Contains(plain, "skill grilling") {
+		t.Fatalf("transcript %q", plain)
 	}
 }
 

@@ -1,8 +1,13 @@
 package agent
 
-import "strings"
+import (
+	"fmt"
+	"strings"
 
-func systemPrompt(cwd string, lsp bool) string {
+	"github.com/kevinjom/co/internal/skill"
+)
+
+func systemPrompt(cwd string, lsp bool, listed, active []skill.Skill) string {
 	lines := []string{
 		"You are co, a coding assistant.",
 		"The working directory is " + cwd + ".",
@@ -28,5 +33,30 @@ func systemPrompt(cwd string, lsp bool) string {
 			"Use lsp_definition, lsp_references, or lsp_hover once a line and column are known.",
 		)
 	}
+	if len(listed) > 0 {
+		lines = append(lines, "Skills:")
+		for _, sk := range listed {
+			lines = append(lines, sk.Name+": "+oneLine(sk.Description))
+		}
+		lines = append(lines, "When a message names a skill as /name, follow that skill for that turn only.")
+	}
+	for _, sk := range active {
+		lines = append(lines, "", skillBlock(sk))
+	}
 	return strings.Join(lines, "\n")
+}
+
+func skillBlock(sk skill.Skill) string {
+	var b strings.Builder
+	if sk.Dir != "" {
+		fmt.Fprintf(&b, "Skill %s is active. Its files are in %s/.\n", sk.Name, sk.Dir)
+	} else {
+		fmt.Fprintf(&b, "Skill %s is active.\n", sk.Name)
+	}
+	b.WriteString(sk.Body)
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func oneLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }

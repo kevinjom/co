@@ -498,6 +498,36 @@ func TestResumeRejectsADifferentDirectory(t *testing.T) {
 	}
 }
 
+func TestResumeKeepsSkillNames(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	w, err := Open(home, dir, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.RecordSkill("grilling"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.RecordSkill("notes"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Resume(home, dir, w.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = loaded.Writer.Close() })
+	if len(loaded.Skills) != 2 || loaded.Skills[0] != "grilling" || loaded.Skills[1] != "notes" {
+		t.Fatalf("skills %v", loaded.Skills)
+	}
+	if len(loaded.Messages) != 0 {
+		t.Fatalf("messages %v", loaded.Messages)
+	}
+}
+
 func readLines(t *testing.T, path string) []string {
 	t.Helper()
 	data, err := os.ReadFile(path)

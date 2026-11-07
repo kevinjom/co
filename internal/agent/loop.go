@@ -293,6 +293,9 @@ func ToolDetail(call openai.ToolCall) string {
 			return "url="
 		}
 		return raw
+	case "bash":
+		command, _ := args["command"].(string)
+		return oneLine(command)
 	case "lsp_definition", "lsp_references", "lsp_hover":
 		return fmt.Sprintf("%s:%d:%d", detailPath(args), detailInt(args["line"]), detailInt(args["column"]))
 	case "lsp_symbols":

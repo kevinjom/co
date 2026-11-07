@@ -417,6 +417,46 @@ func TestAssistantMarkdownRenders(t *testing.T) {
 	}
 }
 
+func TestBashCommandWrapsInTheTranscript(t *testing.T) {
+	m := newTestModel(t)
+	command := strings.TrimSpace(strings.Repeat("echo ", 40))
+	m.tab().blocks = []block{{
+		kind:   blockTool,
+		tool:   "bash",
+		detail: command,
+		done:   true,
+	}}
+	m.tab().busy = true
+	m.tab().activity = "Bash " + command
+	m.paint()
+
+	plain := ansi.Strip(m.View().Content)
+	var column []string
+	for _, line := range strings.Split(plain, "\n") {
+		if panel := strings.Index(line, "│"); panel >= 0 {
+			line = line[:panel]
+		}
+		column = append(column, line)
+	}
+	collapsed := strings.Join(strings.Fields(strings.Join(column, " ")), " ")
+	if !strings.Contains(collapsed, command) {
+		t.Fatalf("missing command in %q", plain)
+	}
+	if !strings.Contains(plain, "Bash "+command[:len("echo echo")]) {
+		t.Fatalf("status missing the command: %q", plain)
+	}
+	transcript := ansi.Strip(m.renderTranscript())
+	if strings.Contains(transcript, "…") {
+		t.Fatalf("command truncated: %q", transcript)
+	}
+	width := m.contentWidth()
+	for _, line := range strings.Split(m.renderTranscript(), "\n") {
+		if w := lipgloss.Width(line); w > width {
+			t.Fatalf("line width %d", w)
+		}
+	}
+}
+
 func TestTranscriptKindsStayDistinct(t *testing.T) {
 	m := newTestModel(t)
 	m.tab().blocks = []block{

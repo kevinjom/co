@@ -10,6 +10,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// sandboxArg is the private first argument of the Linux child.
+// That child applies Landlock and then replaces itself with bash.
+// Go cannot run code between fork and exec, and applying Landlock
+// in this process would confine co itself.
+const sandboxArg = "--internal-sandbox"
+
 func init() {
 	if len(os.Args) < 2 || os.Args[1] != sandboxArg {
 		return

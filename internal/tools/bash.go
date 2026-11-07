@@ -19,12 +19,6 @@ const (
 	bashBinary         = "/bin/bash"
 )
 
-// sandboxArg is the private first argument of the Linux child.
-// That child applies Landlock and then replaces itself with bash.
-// Go cannot run code between fork and exec, and applying Landlock
-// in this process would confine co itself.
-const sandboxArg = "--internal-sandbox"
-
 type bashSpec struct {
 	command string
 	dir     string

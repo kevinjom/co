@@ -390,7 +390,26 @@ func renderReasoning(body string, width int, th theme) string {
 }
 
 func renderTool(block block, width int, th theme) string {
+	if block.tool == "bash" {
+		return renderBash(block, width, th)
+	}
 	return renderInset(clampWidth(toolLine(block, th), insetWidth(width)), width)
+}
+
+func renderBash(block block, width int, th theme) string {
+	head := block
+	head.detail = ""
+	line := toolLine(head, th)
+	command := strings.TrimSpace(block.detail)
+	if command == "" {
+		return renderInset(line, width)
+	}
+	ink := th.dim
+	if block.failed {
+		ink = th.bad
+	}
+	body := ink.Render(wrapText(command, insetWidth(width)))
+	return renderInset(line+"\n"+body, width)
 }
 
 func toolLine(block block, th theme) string {
@@ -429,6 +448,8 @@ func toolLabel(name string) string {
 		return "Edit"
 	case "grep":
 		return "Grep"
+	case "bash":
+		return "Bash"
 	default:
 		if name == "" {
 			return "tool"

@@ -38,8 +38,9 @@ func TestEnableLSPMentionsTools(t *testing.T) {
 	mentionsConfirm := strings.Contains(before, "Do not read the file again")
 	mentionsWrite := strings.Contains(before, "create_file") && strings.Contains(before, "edit_file")
 	mentionsStyle := strings.Contains(before, "Write simple and clean code.")
+	mentionsBash := strings.Contains(before, "Run a command with bash.") && strings.Contains(before, "inside ~/.co")
 	mentionsLSP := strings.Contains(before, "lsp_symbols")
-	ready := mentionsRead && mentionsScope && mentionsConfirm && mentionsWrite && mentionsStyle
+	ready := mentionsRead && mentionsScope && mentionsConfirm && mentionsWrite && mentionsStyle && mentionsBash
 	if !ready || mentionsLSP {
 		t.Fatalf("prompt %q", before)
 	}
@@ -105,5 +106,15 @@ func TestToolDetailForWeb(t *testing.T) {
 	})
 	if fetch != "https://go.dev" {
 		t.Fatalf("fetch %q", fetch)
+	}
+
+	bash := ToolDetail(openai.ToolCall{
+		Function: openai.FunctionCall{
+			Name:      "bash",
+			Arguments: openai.Arguments{"command": "echo hello\necho again"},
+		},
+	})
+	if bash != "echo hello echo again" {
+		t.Fatalf("bash %q", bash)
 	}
 }

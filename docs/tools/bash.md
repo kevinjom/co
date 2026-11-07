@@ -10,13 +10,15 @@ The process working directory is the directory `co` was started in.
 
 The command can read the rest of the disk, including files outside the working directory. It can open outbound network connections.
 
-It can create, overwrite, truncate, rename, and delete files only in that directory and in `~/.co`. That includes credentials, config, logs, transcripts, and skills under `~/.co`. A symlink that points outside those two directories does not open a hole.
+On macOS the command runs under `sandbox-exec` with a profile that allows every operation. It can write anywhere the user can.
 
-The operating system enforces the write rule. On macOS the command runs under `sandbox-exec`. On Linux it runs under Landlock. On any other system, `bash` returns an error and does not run the command. If the sandbox is missing, `co` does not fall back to an unsandboxed run.
+On Linux the command runs under Landlock. It can create, overwrite, truncate, rename, and delete files only in the working directory and in `~/.co`. That includes credentials, config, logs, transcripts, and skills under `~/.co`. A symlink that points outside those two directories does not open a hole.
+
+On any other system, `bash` returns an error and does not run the command. If the sandbox is missing, `co` does not fall back to an unsandboxed run.
 
 ## Environment
 
-The command inherits the environment of `co`. `TMPDIR`, `GOCACHE`, and `GOTMPDIR` are set to `~/.co/bash`, which `co` creates at mode `0700` when a command runs. `GOMODCACHE` is left as it is, so a fetch that needs to write the module cache fails.
+The command inherits the environment of `co`. `TMPDIR`, `GOCACHE`, and `GOTMPDIR` are set to `~/.co/bash`, which `co` creates at mode `0700` when a command runs. `GOMODCACHE` is left as it is. On Linux a fetch that needs to write the module cache fails. On macOS that write is allowed.
 
 ## Lifetime
 

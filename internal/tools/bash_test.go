@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -43,7 +44,7 @@ func TestBashRejectsAnEmptyCommand(t *testing.T) {
 	}
 }
 
-func TestBashWritesOnlyInsideTheWorkDirAndCo(t *testing.T) {
+func TestBashFileWrites(t *testing.T) {
 	set, root := bashSet(t)
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -77,12 +78,7 @@ func TestBashWritesOnlyInsideTheWorkDirAndCo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(got, "exit: ") || strings.HasPrefix(got, "exit: 0") {
-		t.Fatalf("outside write %q", got)
-	}
-	if _, err := os.Stat(outside); !os.IsNotExist(err) {
-		t.Fatalf("outside file err=%v", err)
-	}
+	assertWrite(t, got, outside, runtime.GOOS == "linux")
 
 	target := t.TempDir()
 	if err := os.Symlink(target, filepath.Join(root, "escape")); err != nil {
@@ -92,12 +88,7 @@ func TestBashWritesOnlyInsideTheWorkDirAndCo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(got, "exit: ") || strings.HasPrefix(got, "exit: 0") {
-		t.Fatalf("symlink write %q", got)
-	}
-	if _, err := os.Stat(filepath.Join(target, "nope.txt")); !os.IsNotExist(err) {
-		t.Fatalf("symlink target err=%v", err)
-	}
+	assertWrite(t, got, filepath.Join(target, "nope.txt"), runtime.GOOS == "linux")
 
 	secret := filepath.Join(home, "secret.txt")
 	if err := os.WriteFile(secret, []byte("topsecret\n"), 0o600); err != nil {
@@ -211,6 +202,26 @@ func TestBashTimeoutKillsTheCommand(t *testing.T) {
 	}
 	if time.Since(started) > 5*time.Second {
 		t.Fatalf("took %s", time.Since(started))
+	}
+}
+
+func assertWrite(t *testing.T, got, path string, denied bool) {
+	t.Helper()
+	_, err := os.Stat(path)
+	if denied {
+		if !strings.HasPrefix(got, "exit: ") || strings.HasPrefix(got, "exit: 0") {
+			t.Fatalf("write %q", got)
+		}
+		if !os.IsNotExist(err) {
+			t.Fatalf("file err=%v", err)
+		}
+		return
+	}
+	if got != "exit: 0" {
+		t.Fatalf("write %q", got)
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

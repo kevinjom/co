@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/kevinjom/co/internal/skill"
@@ -22,7 +23,7 @@ func systemPrompt(cwd string, lsp bool, listed, active []skill.Skill) string {
 		"After edit_file succeeds, describe the change from the snippet you wrote. Do not read the file again to confirm it.",
 		"Run a command with bash.",
 		"bash can read files outside the working directory and it can use the network.",
-		"bash can write only inside the working directory and inside ~/.co. A write anywhere else fails.",
+		bashWriteRule(),
 		"Do not use bash to create or edit source files. Use create_file and edit_file.",
 		"Do not invent file contents, line counts, search results, or page contents.",
 		"Use web_search when the answer is not in this directory.",
@@ -48,6 +49,13 @@ func systemPrompt(cwd string, lsp bool, listed, active []skill.Skill) string {
 		lines = append(lines, "", skillBlock(sk))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func bashWriteRule() string {
+	if runtime.GOOS == "linux" {
+		return "bash can write only inside the working directory and inside ~/.co. A write anywhere else fails."
+	}
+	return "bash can write anywhere."
 }
 
 func skillBlock(sk skill.Skill) string {

@@ -1,6 +1,7 @@
 // Package tools exposes the model's tools.
 // Filesystem tools are jailed to one directory. The bash tool can read the rest of the
-// disk, and it can write only inside that directory and ~/.co.
+// disk. On macOS it can write anywhere. On Linux it can write only inside that
+// directory and ~/.co.
 // Web tools search and fetch public pages.
 package tools
 

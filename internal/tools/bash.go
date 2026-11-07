@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,7 +30,7 @@ type bashSpec struct {
 func bashSchema() Schema {
 	return Schema{
 		Name:        "bash",
-		Description: "Run a shell command. stdout and stderr come back with the exit code. The command can read the rest of the disk and use the network. It can write only inside the working directory and ~/.co. A command still running after 2 minutes is killed.",
+		Description: bashDescription(),
 		Parameters: objectSchema(
 			map[string]any{
 				"command": stringProp("Shell command to run."),
@@ -37,6 +38,17 @@ func bashSchema() Schema {
 			[]string{"command"},
 		),
 	}
+}
+
+func bashDescription() string {
+	write := "It can write anywhere."
+	if runtime.GOOS == "linux" {
+		write = "It can write only inside the working directory and ~/.co."
+	}
+	return "Run a shell command. stdout and stderr come back with the exit code. " +
+		"The command can read the rest of the disk and use the network. " +
+		write +
+		" A command still running after 2 minutes is killed."
 }
 
 func (s *Set) bash(ctx context.Context, args map[string]any) (string, error) {

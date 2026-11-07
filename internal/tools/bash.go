@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -24,13 +23,15 @@ type bashSpec struct {
 	command string
 	dir     string
 	env     []string
-	writes  []string
 }
 
 func bashSchema() Schema {
 	return Schema{
-		Name:        "bash",
-		Description: bashDescription(),
+		Name: "bash",
+		Description: "Run a shell command. stdout and stderr come back with the exit code. " +
+			"The command can read the rest of the disk and use the network. " +
+			"It can write anywhere. " +
+			"A command still running after 2 minutes is killed.",
 		Parameters: objectSchema(
 			map[string]any{
 				"command": stringProp("Shell command to run."),
@@ -38,17 +39,6 @@ func bashSchema() Schema {
 			[]string{"command"},
 		),
 	}
-}
-
-func bashDescription() string {
-	write := "It can write anywhere."
-	if runtime.GOOS == "linux" {
-		write = "It can write only inside the working directory and ~/.co."
-	}
-	return "Run a shell command. stdout and stderr come back with the exit code. " +
-		"The command can read the rest of the disk and use the network. " +
-		write +
-		" A command still running after 2 minutes is killed."
 }
 
 func (s *Set) bash(ctx context.Context, args map[string]any) (string, error) {
@@ -87,39 +77,34 @@ func (s *Set) bashSpec(command string) (bashSpec, error) {
 	if err != nil {
 		return bashSpec{}, err
 	}
-	coDir, scratch, err := bashScratch()
+	scratch, err := bashScratch()
 	if err != nil {
 		return bashSpec{}, err
-	}
-	realCo, err := filepath.EvalSymlinks(coDir)
-	if err != nil {
-		return bashSpec{}, fmt.Errorf("config directory: %w", err)
 	}
 	return bashSpec{
 		command: command,
 		dir:     root,
 		env:     bashEnv(scratch),
-		writes:  []string{root, realCo},
 	}, nil
 }
 
-func bashScratch() (string, string, error) {
+func bashScratch() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", "", fmt.Errorf("home directory: %w", err)
+		return "", fmt.Errorf("home directory: %w", err)
 	}
 	coDir := filepath.Join(home, ".co")
 	scratch := filepath.Join(coDir, "bash")
 	if err := os.MkdirAll(scratch, 0o700); err != nil {
-		return "", "", fmt.Errorf("creating scratch directory: %w", err)
+		return "", fmt.Errorf("creating scratch directory: %w", err)
 	}
 	if err := os.Chmod(coDir, 0o700); err != nil {
-		return "", "", fmt.Errorf("creating scratch directory: %w", err)
+		return "", fmt.Errorf("creating scratch directory: %w", err)
 	}
 	if err := os.Chmod(scratch, 0o700); err != nil {
-		return "", "", fmt.Errorf("creating scratch directory: %w", err)
+		return "", fmt.Errorf("creating scratch directory: %w", err)
 	}
-	return coDir, scratch, nil
+	return scratch, nil
 }
 
 func bashEnv(scratch string) []string {

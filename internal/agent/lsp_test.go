@@ -38,7 +38,7 @@ func TestEnableLSPMentionsTools(t *testing.T) {
 	mentionsConfirm := strings.Contains(before, "Do not read the file again")
 	mentionsWrite := strings.Contains(before, "create_file") && strings.Contains(before, "edit_file")
 	mentionsStyle := strings.Contains(before, "Write simple and clean code.")
-	mentionsBash := strings.Contains(before, "Run a command with bash.") && strings.Contains(before, bashWriteRule())
+	mentionsBash := strings.Contains(before, "Run a command with bash.") && strings.Contains(before, "bash can write anywhere.")
 	mentionsLSP := strings.Contains(before, "lsp_symbols")
 	ready := mentionsRead && mentionsScope && mentionsConfirm && mentionsWrite && mentionsStyle && mentionsBash
 	if !ready || mentionsLSP {

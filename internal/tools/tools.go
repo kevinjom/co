@@ -1,5 +1,7 @@
 // Package tools exposes the model's tools.
-// Filesystem tools are jailed to one directory. Web tools search and fetch public pages.
+// Filesystem tools are jailed to one directory. The bash tool can read the rest of the
+// disk, and it can write only inside that directory and ~/.co.
+// Web tools search and fetch public pages.
 package tools
 
 import (
@@ -8,6 +10,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const maxLineBytes = 1024 * 1024
@@ -28,9 +31,10 @@ type tool struct {
 
 // Set is the tool surface for one working directory.
 type Set struct {
-	root  string
-	lang  Language
-	tools []tool
+	root        string
+	lang        Language
+	tools       []tool
+	bashTimeout time.Duration
 }
 
 // New returns the tools for root.
@@ -44,6 +48,7 @@ func New(root string) *Set {
 		{schema: grepSchema(), run: set.grep},
 		{schema: createFileSchema(), run: set.createFile},
 		{schema: editFileSchema(), run: set.editFile},
+		{schema: bashSchema(), run: set.bash},
 		{schema: webSearchSchema(), run: set.webSearch},
 		{schema: webFetchSchema(), run: set.webFetch},
 	}

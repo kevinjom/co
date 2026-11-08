@@ -7,7 +7,7 @@
 
 🚧 **Status:** actively under development and not stable. Interfaces, behavior, and the on-disk config may change without notice.
 
-`co` is a coding assistant for the directory you start it in. It talks to OpenAI-compatible chat endpoints, and the model may list, read, search, create, and edit files inside that directory. It cannot leave the directory, including through symlinks.
+`co` is a coding assistant for the directory you start it in. It talks to OpenAI-compatible chat endpoints, and the model may list, read, search, create, and edit files inside that directory. Those file tools cannot leave the directory, including through symlinks. The model may also run a shell command. That command can read the rest of the disk and use the network. It can write anywhere the user can.
 
 A terminal on both stdin and stdout gets a Bubble Tea TUI, which can hold more than one session. A pipe or a redirect gets a line reader with one session.
 
@@ -186,7 +186,7 @@ co session list --limit 5
 
 ## What the model can do
 
-The model gets filesystem tools, jailed to the working directory, web search and page fetch, and language-server tools when a server binary is on `PATH`. Today that is `gopls` for `.go` files. See [docs/lsp.md](docs/lsp.md).
+The model gets filesystem tools, jailed to the working directory, a shell command, web search and page fetch, and language-server tools when a server binary is on `PATH`. Today that is `gopls` for `.go` files. See [docs/lsp.md](docs/lsp.md) and [docs/tools/bash.md](docs/tools/bash.md).
 
 | Tool | |
 | --- | --- |
@@ -194,6 +194,7 @@ The model gets filesystem tools, jailed to the working directory, web search and
 | `read_file` | A window of a text file. Defaults to 200 lines from line 1. |
 | `create_file` | Create a new file. Fails if the path already exists. |
 | `edit_file` | Replace one snippet that appears once. Other bytes stay as they are. |
+| `bash` | Run a shell command. See [docs/tools/bash.md](docs/tools/bash.md). |
 | `grep` | A Go regular expression. Skips `.git`. Returns at most 50 matches. |
 | `web_search` | DuckDuckGo search. Defaults to 8 results, at most 10. |
 | `web_fetch` | One http or https page, as Markdown. |

@@ -190,8 +190,13 @@ func TestBashCancelKillsTheGroup(t *testing.T) {
 	if !errors.Is(runErr, context.Canceled) {
 		t.Fatalf("err %v", runErr)
 	}
-	if err := syscall.Kill(pid, 0); err == nil {
-		t.Fatalf("pid %d still running", pid)
+	// The pid can still answer kill(0) until the kernel reaps the zombie.
+	deadline = time.Now().Add(time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("pid %d still running", pid)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

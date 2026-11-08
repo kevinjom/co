@@ -25,7 +25,7 @@ import (
 func newRootCmd() (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:           "co",
-		Short:         "Read-only coding assistant for the current directory",
+		Short:         "an coding assistant that cooks code for the current directory",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,

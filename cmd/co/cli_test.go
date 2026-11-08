@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/kevinjom/co/internal/config"
+	"github.com/kevinjom/co/internal/llm"
 	"github.com/kevinjom/co/internal/logs"
-	"github.com/kevinjom/co/internal/openai"
 	"github.com/kevinjom/co/internal/provider"
 	"github.com/kevinjom/co/internal/transcript"
 
@@ -1458,7 +1458,7 @@ func TestSessionListStaysInThisDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Record(openai.Message{Role: "user", Content: "other project"}, false); err != nil {
+	if err := w.Record(llm.Message{Role: "user", Content: "other project"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Close(); err != nil {
@@ -1495,7 +1495,7 @@ func seedSessions(t *testing.T, n int) []string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := w.Record(openai.Message{Role: "user", Content: fmt.Sprintf("prompt %d", i)}, false); err != nil {
+		if err := w.Record(llm.Message{Role: "user", Content: fmt.Sprintf("prompt %d", i)}, false); err != nil {
 			t.Fatal(err)
 		}
 		if err := w.Close(); err != nil {

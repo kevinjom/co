@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 )
 
 // InputError is a session id or transcript the user must correct.
@@ -36,7 +36,7 @@ type Loaded struct {
 	Writer   *Writer
 	Model    string
 	Title    string
-	Messages []openai.Message
+	Messages []llm.Message
 	Skills   []string
 }
 
@@ -125,7 +125,7 @@ type parsedSession struct {
 	headerModel string
 	model       string
 	title       string
-	messages    []openai.Message
+	messages    []llm.Message
 	skills      []string
 	seq         int
 	kept        int
@@ -162,7 +162,7 @@ func parseSession(id, cwd string, raw []byte) (parsedSession, error) {
 	parsed := parsedSession{
 		headerModel: header.Model,
 		model:       header.Model,
-		messages:    []openai.Message{},
+		messages:    []llm.Message{},
 		skills:      []string{},
 		kept:        len(kept),
 	}

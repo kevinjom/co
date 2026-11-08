@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm/openai"
 	"github.com/kevinjom/co/internal/skill"
 )
 

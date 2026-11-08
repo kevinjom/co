@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 )
 
 const previewRunes = 60
@@ -144,7 +144,7 @@ func FallbackTitle(text string) string {
 	return strings.Join(words, " ")
 }
 
-func firstUserText(messages []openai.Message) string {
+func firstUserText(messages []llm.Message) string {
 	for _, msg := range messages {
 		if msg.Role == "user" {
 			return msg.Content

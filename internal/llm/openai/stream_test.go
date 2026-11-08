@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/kevinjom/co/internal/llm"
 )
 
 func writeSSE(w http.ResponseWriter, chunks ...string) {
@@ -79,10 +81,10 @@ func TestChatStreamSendsDeltas(t *testing.T) {
 	msg, err := New(server.URL).ChatStream(
 		t.Context(),
 		"m",
-		[]Message{{Role: "user", Content: "hi"}},
+		[]llm.Message{{Role: "user", Content: "hi"}},
 		nil,
-		func(kind StreamKind, delta string) {
-			if kind != StreamContent {
+		func(kind llm.StreamKind, delta string) {
+			if kind != llm.StreamContent {
 				t.Errorf("kind %d", kind)
 			}
 			deltas = append(deltas, delta)
@@ -172,8 +174,8 @@ func TestChatStreamRejectsMalformedChunk(t *testing.T) {
 		"m",
 		nil,
 		nil,
-		func(kind StreamKind, delta string) {
-			if kind != StreamContent {
+		func(kind llm.StreamKind, delta string) {
+			if kind != llm.StreamContent {
 				t.Errorf("kind %d", kind)
 			}
 			deltas = append(deltas, delta)
@@ -221,7 +223,7 @@ func TestChatStreamCancelKeepsPartialText(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	msg, err := New(server.URL).ChatStream(ctx, "m", nil, nil, func(StreamKind, string) {
+	msg, err := New(server.URL).ChatStream(ctx, "m", nil, nil, func(llm.StreamKind, string) {
 		cancel()
 	})
 	if !errors.Is(err, context.Canceled) {
@@ -248,11 +250,11 @@ func TestChatStreamSeparatesReasoning(t *testing.T) {
 	defer server.Close()
 
 	var got []string
-	msg, err := New(server.URL).ChatStream(t.Context(), "m", nil, nil, func(kind StreamKind, text string) {
+	msg, err := New(server.URL).ChatStream(t.Context(), "m", nil, nil, func(kind llm.StreamKind, text string) {
 		switch kind {
-		case StreamReasoning:
+		case llm.StreamReasoning:
 			got = append(got, "r:"+text)
-		case StreamContent:
+		case llm.StreamContent:
 			got = append(got, "c:"+text)
 		default:
 			t.Errorf("kind %d", kind)
@@ -311,13 +313,13 @@ func TestEndpointSendsKeyAndSkipsReasoning(t *testing.T) {
 	defer server.Close()
 
 	var sawReasoning bool
-	msg, err := NewEndpoint(server.URL, "secret", Compat{}).ChatStream(
+	msg, err := NewEndpoint(server.URL, "secret", llm.Compat{}).ChatStream(
 		t.Context(),
 		"m",
 		nil,
 		nil,
-		func(kind StreamKind, _ string) {
-			if kind == StreamReasoning {
+		func(kind llm.StreamKind, _ string) {
+			if kind == llm.StreamReasoning {
 				sawReasoning = true
 			}
 		},
@@ -339,7 +341,7 @@ func TestChatPathFollowsBase(t *testing.T) {
 	defer server.Close()
 
 	base := server.URL + "/v1beta/openai"
-	if _, err := NewEndpoint(base, "secret", Compat{}).ChatStream(t.Context(), "gemini-flash-latest", nil, nil, nil); err != nil {
+	if _, err := NewEndpoint(base, "secret", llm.Compat{}).ChatStream(t.Context(), "gemini-flash-latest", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got != "/v1beta/openai/chat/completions" {
@@ -372,7 +374,7 @@ func TestChatStreamReplaysThoughtSignature(t *testing.T) {
 				Function struct {
 					Name string `json:"name"`
 				} `json:"function"`
-				ExtraContent *ExtraContent `json:"extra_content"`
+				ExtraContent *llm.ExtraContent `json:"extra_content"`
 			} `json:"tool_calls"`
 		} `json:"messages"`
 	}
@@ -401,7 +403,7 @@ func TestChatStreamReplaysThoughtSignature(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewEndpoint(server.URL, "secret", Compat{})
+	client := NewEndpoint(server.URL, "secret", llm.Compat{})
 	msg, err := client.ChatStream(t.Context(), "gemini-flash-latest", nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -416,7 +418,7 @@ func TestChatStreamReplaysThoughtSignature(t *testing.T) {
 		t.Fatalf("second call carried %+v", msg.ToolCalls[1].ExtraContent)
 	}
 
-	_, err = client.ChatStream(t.Context(), "gemini-flash-latest", []Message{
+	_, err = client.ChatStream(t.Context(), "gemini-flash-latest", []llm.Message{
 		{Role: "user", Content: "look"},
 		msg,
 		{Role: "tool", Content: "files", ToolCallID: "call_1"},

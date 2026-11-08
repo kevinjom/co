@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 )
 
 func TestCleanTitleKeepsTheFirstLine(t *testing.T) {
@@ -80,7 +80,7 @@ func TestRestoredSessionIsNotRenamed(t *testing.T) {
 	chat := &titleChat{title: "Should not run"}
 	rec := &titleStore{}
 	session := NewSession(chat, "test-model", t.TempDir(), rec)
-	session.Restore([]openai.Message{{Role: "user", Content: "old"}})
+	session.Restore([]llm.Message{{Role: "user", Content: "old"}})
 	if _, err := session.Turn(t.Context(), "next", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -124,10 +124,10 @@ type titleChat struct {
 func (c *titleChat) ChatStream(
 	_ context.Context,
 	_ string,
-	messages []openai.Message,
-	_ []openai.Tool,
-	onChunk func(openai.StreamKind, string),
-) (openai.Message, error) {
+	messages []llm.Message,
+	_ []llm.Tool,
+	onChunk func(llm.StreamKind, string),
+) (llm.Message, error) {
 	c.mu.Lock()
 	titleReq := len(messages) > 0 && strings.Contains(messages[0].Content, "Reply with a short title")
 	if titleReq {
@@ -140,9 +140,9 @@ func (c *titleChat) ChatStream(
 			hold()
 		}
 		if err != nil {
-			return openai.Message{}, err
+			return llm.Message{}, err
 		}
-		return openai.Message{Role: "assistant", Content: title}, nil
+		return llm.Message{Role: "assistant", Content: title}, nil
 	}
 	c.turns++
 	hold := c.onTurn
@@ -151,9 +151,9 @@ func (c *titleChat) ChatStream(
 		hold()
 	}
 	if onChunk != nil {
-		onChunk(openai.StreamContent, "ok")
+		onChunk(llm.StreamContent, "ok")
 	}
-	return openai.Message{Role: "assistant", Content: "ok"}, nil
+	return llm.Message{Role: "assistant", Content: "ok"}, nil
 }
 
 type titleStore struct {

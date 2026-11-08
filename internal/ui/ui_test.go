@@ -15,7 +15,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kevinjom/co/internal/agent"
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
+	"github.com/kevinjom/co/internal/llm/openai"
 	"github.com/kevinjom/co/internal/skill"
 )
 
@@ -812,14 +813,14 @@ func TestPasteFillsConnectKey(t *testing.T) {
 func TestResumeRendersPriorTurns(t *testing.T) {
 	dir := t.TempDir()
 	session := agent.NewSession(openai.New("http://127.0.0.1:1"), "test-model", dir, nil)
-	session.Restore([]openai.Message{
+	session.Restore([]llm.Message{
 		{Role: "user", Content: "how many lines?"},
-		{Role: "assistant", ToolCalls: []openai.ToolCall{{
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{
 			ID:   "call-1",
 			Type: "function",
-			Function: openai.FunctionCall{
+			Function: llm.FunctionCall{
 				Name:      "list_dir",
-				Arguments: openai.Arguments{"path": "."},
+				Arguments: llm.Arguments{"path": "."},
 			},
 		}}},
 		{Role: "tool", Content: "a.go", ToolCallID: "call-1"},
@@ -1092,7 +1093,7 @@ func TestNarrowTerminalHidesTheSessionPanel(t *testing.T) {
 
 func TestSessionTitleUpdatesThePanel(t *testing.T) {
 	m := newTestModel(t)
-	m.tab().session.Restore([]openai.Message{{Role: "user", Content: "how many lines are in this file?"}})
+	m.tab().session.Restore([]llm.Message{{Role: "user", Content: "how many lines are in this file?"}})
 	cmd := m.watchTitle(m.tab())
 	if cmd == nil {
 		t.Fatal("expected a title watch")
@@ -1433,19 +1434,19 @@ type floodChat struct {
 func (f *floodChat) ChatStream(
 	_ context.Context,
 	_ string,
-	_ []openai.Message,
-	_ []openai.Tool,
-	onChunk func(openai.StreamKind, string),
-) (openai.Message, error) {
+	_ []llm.Message,
+	_ []llm.Tool,
+	onChunk func(llm.StreamKind, string),
+) (llm.Message, error) {
 	var b strings.Builder
 	for range f.n {
 		if onChunk != nil {
-			onChunk(openai.StreamContent, "x")
+			onChunk(llm.StreamContent, "x")
 		}
 		b.WriteString("x")
 	}
 	close(f.done)
-	return openai.Message{Role: "assistant", Content: b.String()}, nil
+	return llm.Message{Role: "assistant", Content: b.String()}, nil
 }
 
 type gateChat struct {
@@ -1456,19 +1457,19 @@ type gateChat struct {
 func (g *gateChat) ChatStream(
 	_ context.Context,
 	_ string,
-	_ []openai.Message,
-	_ []openai.Tool,
-	onChunk func(openai.StreamKind, string),
-) (openai.Message, error) {
+	_ []llm.Message,
+	_ []llm.Tool,
+	onChunk func(llm.StreamKind, string),
+) (llm.Message, error) {
 	if onChunk != nil {
-		onChunk(openai.StreamContent, "hel")
+		onChunk(llm.StreamContent, "hel")
 	}
 	close(g.entered)
 	<-g.release
 	if onChunk != nil {
-		onChunk(openai.StreamContent, "lo")
+		onChunk(llm.StreamContent, "lo")
 	}
-	return openai.Message{Role: "assistant", Content: "hello"}, nil
+	return llm.Message{Role: "assistant", Content: "hello"}, nil
 }
 
 func TestThemeSwitch(t *testing.T) {

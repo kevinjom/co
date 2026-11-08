@@ -5,7 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
+	"github.com/kevinjom/co/internal/llm/openai"
 )
 
 type idleLanguage struct{}
@@ -52,10 +53,10 @@ func TestEnableLSPMentionsTools(t *testing.T) {
 }
 
 func TestToolDetailForLSP(t *testing.T) {
-	definition := ToolDetail(openai.ToolCall{
-		Function: openai.FunctionCall{
+	definition := ToolDetail(llm.ToolCall{
+		Function: llm.FunctionCall{
 			Name: "lsp_definition",
-			Arguments: openai.Arguments{
+			Arguments: llm.Arguments{
 				"path":   "a.go",
 				"line":   float64(4),
 				"column": float64(2),
@@ -66,20 +67,20 @@ func TestToolDetailForLSP(t *testing.T) {
 		t.Fatalf("definition %q", definition)
 	}
 
-	symbols := ToolDetail(openai.ToolCall{
-		Function: openai.FunctionCall{
+	symbols := ToolDetail(llm.ToolCall{
+		Function: llm.FunctionCall{
 			Name:      "lsp_symbols",
-			Arguments: openai.Arguments{"query": "Foo"},
+			Arguments: llm.Arguments{"query": "Foo"},
 		},
 	})
 	if symbols != "query=\"Foo\"" {
 		t.Fatalf("symbols %q", symbols)
 	}
 
-	diagnostics := ToolDetail(openai.ToolCall{
-		Function: openai.FunctionCall{
+	diagnostics := ToolDetail(llm.ToolCall{
+		Function: llm.FunctionCall{
 			Name:      "lsp_diagnostics",
-			Arguments: openai.Arguments{},
+			Arguments: llm.Arguments{},
 		},
 	})
 	if diagnostics != "workspace" {
@@ -88,30 +89,30 @@ func TestToolDetailForLSP(t *testing.T) {
 }
 
 func TestToolDetailForWeb(t *testing.T) {
-	search := ToolDetail(openai.ToolCall{
-		Function: openai.FunctionCall{
+	search := ToolDetail(llm.ToolCall{
+		Function: llm.FunctionCall{
 			Name:      "web_search",
-			Arguments: openai.Arguments{"query": "golang http"},
+			Arguments: llm.Arguments{"query": "golang http"},
 		},
 	})
 	if search != `query="golang http"` {
 		t.Fatalf("search %q", search)
 	}
 
-	fetch := ToolDetail(openai.ToolCall{
-		Function: openai.FunctionCall{
+	fetch := ToolDetail(llm.ToolCall{
+		Function: llm.FunctionCall{
 			Name:      "web_fetch",
-			Arguments: openai.Arguments{"url": "https://go.dev"},
+			Arguments: llm.Arguments{"url": "https://go.dev"},
 		},
 	})
 	if fetch != "https://go.dev" {
 		t.Fatalf("fetch %q", fetch)
 	}
 
-	bash := ToolDetail(openai.ToolCall{
-		Function: openai.FunctionCall{
+	bash := ToolDetail(llm.ToolCall{
+		Function: llm.FunctionCall{
 			Name:      "bash",
-			Arguments: openai.Arguments{"command": "echo hello\necho again"},
+			Arguments: llm.Arguments{"command": "echo hello\necho again"},
 		},
 	})
 	if bash != "echo hello echo again" {

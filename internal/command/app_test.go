@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 	"github.com/kevinjom/co/internal/provider"
 )
 
@@ -66,7 +66,7 @@ providers:
 		t.Fatalf("models %q %q", first.Model(), second.Model())
 	}
 
-	msg := openai.Message{Role: "user", Content: "hello"}
+	msg := llm.Message{Role: "user", Content: "hello"}
 	h0 := app.running[0].history
 	h1 := app.running[1].history
 	if err := h0.Record(msg, false); err != nil {

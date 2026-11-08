@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 	"github.com/kevinjom/co/internal/theme"
 )
 
@@ -18,7 +18,7 @@ type Endpoint struct {
 	BaseURL string
 	APIKey  string
 	Model   string
-	Compat  openai.Compat
+	Compat  llm.Compat
 }
 
 // NeedsKeyError means a provider requires a key and none is available.

@@ -10,37 +10,24 @@ import (
 	"sync"
 
 	"github.com/kevinjom/co/internal/config"
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 	"github.com/kevinjom/co/internal/skill"
 	"github.com/kevinjom/co/internal/tools"
 )
 
 // Recorder stores completed messages. A nil recorder leaves history off.
 type Recorder interface {
-	Record(msg openai.Message, interrupted bool) error
+	Record(msg llm.Message, interrupted bool) error
 }
-
-// Chatter is one OpenAI-compatible chat endpoint.
-type Chatter interface {
-	ChatStream(
-		ctx context.Context,
-		model string,
-		messages []openai.Message,
-		tools []openai.Tool,
-		onChunk func(openai.StreamKind, string),
-	) (openai.Message, error)
-}
-
-var _ Chatter = (*openai.Client)(nil)
 
 // Session is one in-memory conversation.
 type Session struct {
-	client        Chatter
+	client        llm.Chatter
 	model         string
 	cwd           string
 	tools         *tools.Set
-	defs          []openai.Tool
-	messages      []openai.Message
+	defs          []llm.Tool
+	messages      []llm.Message
 	recorder      Recorder
 	maxToolRounds int
 	catalog       *skill.Catalog
@@ -54,7 +41,7 @@ type Session struct {
 
 // NewSession starts a conversation rooted at cwd.
 // A nil recorder does not write history.
-func NewSession(client Chatter, model, cwd string, recorder Recorder) *Session {
+func NewSession(client llm.Chatter, model, cwd string, recorder Recorder) *Session {
 	set := tools.New(cwd)
 	return &Session{
 		client:        client,
@@ -65,7 +52,7 @@ func NewSession(client Chatter, model, cwd string, recorder Recorder) *Session {
 		recorder:      recorder,
 		maxToolRounds: config.DefaultMaxToolRounds,
 		active:        []string{},
-		messages: []openai.Message{
+		messages: []llm.Message{
 			{
 				Role: "system",
 				Content: systemPrompt(
@@ -102,7 +89,7 @@ func (s *Session) SetMaxToolRounds(n int) {
 
 // SetModel points later turns at a different endpoint and wire model id.
 // The message list is left as it is.
-func (s *Session) SetModel(client Chatter, model string) {
+func (s *Session) SetModel(client llm.Chatter, model string) {
 	s.client = client
 	s.model = model
 }
@@ -119,13 +106,13 @@ func (s *Session) DropRecorder() {
 
 // Restore appends messages from an earlier run after the system prompt.
 // Those messages are not written again.
-func (s *Session) Restore(messages []openai.Message) {
+func (s *Session) Restore(messages []llm.Message) {
 	s.messages = append(s.messages, messages...)
 }
 
 // Messages returns a copy of the conversation, including the system prompt.
-func (s *Session) Messages() []openai.Message {
-	out := make([]openai.Message, len(s.messages))
+func (s *Session) Messages() []llm.Message {
+	out := make([]llm.Message, len(s.messages))
 	copy(out, s.messages)
 	return out
 }
@@ -148,7 +135,7 @@ func (s *Session) Reply(ctx context.Context, lines []string, observe Observer) (
 	defer s.clearTurnSkills()
 	first := !hasUserMessage(s.messages)
 	for _, line := range lines {
-		s.remember(openai.Message{Role: "user", Content: line}, false)
+		s.remember(llm.Message{Role: "user", Content: line}, false)
 	}
 	if first {
 		s.storeFallbackTitle(lines[0])
@@ -178,13 +165,13 @@ func (s *Session) converse(ctx context.Context, observe Observer) (string, error
 	return msg.Content, nil
 }
 
-func (s *Session) complete(ctx context.Context, defs []openai.Tool, observe Observer) (openai.Message, error) {
+func (s *Session) complete(ctx context.Context, defs []llm.Tool, observe Observer) (llm.Message, error) {
 	var reasoning strings.Builder
-	msg, err := s.client.ChatStream(ctx, s.model, s.messages, defs, func(kind openai.StreamKind, text string) {
+	msg, err := s.client.ChatStream(ctx, s.model, s.messages, defs, func(kind llm.StreamKind, text string) {
 		switch kind {
-		case openai.StreamContent:
+		case llm.StreamContent:
 			emit(observe, AnswerDelta{Text: text})
-		case openai.StreamReasoning:
+		case llm.StreamReasoning:
 			reasoning.WriteString(text)
 			emit(observe, ReasoningDelta{Text: text})
 		default:
@@ -196,7 +183,7 @@ func (s *Session) complete(ctx context.Context, defs []openai.Tool, observe Obse
 }
 
 // answerText keeps a reasoning-only reply. A tool call stays content-free.
-func answerText(msg openai.Message, reasoning string) string {
+func answerText(msg llm.Message, reasoning string) string {
 	if strings.TrimSpace(msg.Content) != "" || len(msg.ToolCalls) > 0 {
 		return msg.Content
 	}
@@ -205,7 +192,7 @@ func answerText(msg openai.Message, reasoning string) string {
 
 // keepPartial stores a canceled answer so the next turn can see what the user already saw.
 // Any other error leaves the session unchanged apart from the user line.
-func (s *Session) keepPartial(msg openai.Message, err error) (string, error) {
+func (s *Session) keepPartial(msg llm.Message, err error) (string, error) {
 	stopped := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 	if !stopped || msg.Content == "" {
 		return "", err
@@ -220,7 +207,7 @@ func (s *Session) keepPartial(msg openai.Message, err error) (string, error) {
 
 // remember keeps a finished message in the session and, when history is on, in the transcript.
 // A write failure disables history for the rest of the process. The turn itself still succeeds.
-func (s *Session) remember(msg openai.Message, interrupted bool) {
+func (s *Session) remember(msg llm.Message, interrupted bool) {
 	s.messages = append(s.messages, msg)
 	if s.recorder == nil {
 		return
@@ -231,7 +218,7 @@ func (s *Session) remember(msg openai.Message, interrupted bool) {
 	}
 }
 
-func (s *Session) runTools(ctx context.Context, calls []openai.ToolCall, observe Observer) {
+func (s *Session) runTools(ctx context.Context, calls []llm.ToolCall, observe Observer) {
 	for _, call := range calls {
 		emit(observe, ToolStart{
 			ID:     call.ID,
@@ -240,7 +227,7 @@ func (s *Session) runTools(ctx context.Context, calls []openai.ToolCall, observe
 		})
 		result, toolErr := s.tools.Run(ctx, call.Function.Name, map[string]any(call.Function.Arguments))
 		emit(observe, ToolDone{ID: call.ID, Err: toolErr})
-		s.remember(openai.Message{
+		s.remember(llm.Message{
 			Role:       "tool",
 			Content:    result,
 			ToolCallID: call.ID,
@@ -248,7 +235,7 @@ func (s *Session) runTools(ctx context.Context, calls []openai.ToolCall, observe
 	}
 }
 
-func hasUserMessage(messages []openai.Message) bool {
+func hasUserMessage(messages []llm.Message) bool {
 	for _, msg := range messages {
 		if msg.Role == "user" {
 			return true
@@ -257,13 +244,13 @@ func hasUserMessage(messages []openai.Message) bool {
 	return false
 }
 
-func toolDefinitions(set *tools.Set) []openai.Tool {
+func toolDefinitions(set *tools.Set) []llm.Tool {
 	schemas := set.Schemas()
-	defs := make([]openai.Tool, 0, len(schemas))
+	defs := make([]llm.Tool, 0, len(schemas))
 	for _, schema := range schemas {
-		defs = append(defs, openai.Tool{
+		defs = append(defs, llm.Tool{
 			Type: "function",
-			Function: openai.ToolSpec{
+			Function: llm.ToolSpec{
 				Name:        schema.Name,
 				Description: schema.Description,
 				Parameters:  schema.Parameters,
@@ -274,10 +261,10 @@ func toolDefinitions(set *tools.Set) []openai.Tool {
 }
 
 // ToolDetail is the short argument summary shown for a tool call.
-func ToolDetail(call openai.ToolCall) string {
+func ToolDetail(call llm.ToolCall) string {
 	args := call.Function.Arguments
 	if args == nil {
-		args = openai.Arguments{}
+		args = llm.Arguments{}
 	}
 
 	switch call.Function.Name {
@@ -314,7 +301,7 @@ func ToolDetail(call openai.ToolCall) string {
 	}
 }
 
-func detailPath(args openai.Arguments) string {
+func detailPath(args llm.Arguments) string {
 	path, _ := args["path"].(string)
 	if strings.TrimSpace(path) == "" {
 		return "."

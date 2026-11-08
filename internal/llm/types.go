@@ -1,5 +1,4 @@
-// Package openai is a client for the OpenAI chat-completions API.
-package openai
+package llm
 
 import (
 	"encoding/json"
@@ -31,20 +30,6 @@ type ExtraContent struct {
 // GoogleExtra is Gemini's addition to an OpenAI tool call.
 type GoogleExtra struct {
 	ThoughtSignature string `json:"thought_signature,omitempty"`
-}
-
-func thoughtSignature(extra *ExtraContent) string {
-	if extra == nil || extra.Google == nil {
-		return ""
-	}
-	return extra.Google.ThoughtSignature
-}
-
-func withThoughtSignature(signature string) *ExtraContent {
-	if signature == "" {
-		return nil
-	}
-	return &ExtraContent{Google: &GoogleExtra{ThoughtSignature: signature}}
 }
 
 // FunctionCall is the name and arguments of one tool call.

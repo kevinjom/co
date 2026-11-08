@@ -14,7 +14,8 @@ import (
 	"time"
 
 	"github.com/kevinjom/co/internal/config"
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
+	"github.com/kevinjom/co/internal/llm/openai"
 )
 
 func writeSSE(w http.ResponseWriter, chunks ...string) {
@@ -322,13 +323,13 @@ func TestTurnReportsToolFailure(t *testing.T) {
 }
 
 type memRecorder struct {
-	msgs        []openai.Message
+	msgs        []llm.Message
 	interrupted []bool
 	fail        error
 	calls       int
 }
 
-func (m *memRecorder) Record(msg openai.Message, interrupted bool) error {
+func (m *memRecorder) Record(msg llm.Message, interrupted bool) error {
 	m.calls++
 	if m.fail != nil {
 		return m.fail
@@ -522,23 +523,23 @@ func TestTurnStopsWhenContextIsCanceled(t *testing.T) {
 
 type scriptChat struct {
 	model string
-	seen  [][]openai.Message
+	seen  [][]llm.Message
 }
 
 func (s *scriptChat) ChatStream(
 	_ context.Context,
 	model string,
-	messages []openai.Message,
-	_ []openai.Tool,
-	onChunk func(openai.StreamKind, string),
-) (openai.Message, error) {
+	messages []llm.Message,
+	_ []llm.Tool,
+	onChunk func(llm.StreamKind, string),
+) (llm.Message, error) {
 	s.model = model
-	copied := append([]openai.Message{}, messages...)
+	copied := append([]llm.Message{}, messages...)
 	s.seen = append(s.seen, copied)
 	if onChunk != nil {
-		onChunk(openai.StreamContent, "ok")
+		onChunk(llm.StreamContent, "ok")
 	}
-	return openai.Message{Role: "assistant", Content: "ok"}, nil
+	return llm.Message{Role: "assistant", Content: "ok"}, nil
 }
 
 func TestSetModelKeepsMessages(t *testing.T) {
@@ -574,7 +575,7 @@ func TestRestoreIsSentOnTheNextTurn(t *testing.T) {
 	rec := &memRecorder{}
 	chat := &scriptChat{}
 	session := NewSession(chat, "test-model", t.TempDir(), rec)
-	session.Restore([]openai.Message{
+	session.Restore([]llm.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
 	})

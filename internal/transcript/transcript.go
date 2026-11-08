@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 )
 
 const version = 1
@@ -42,12 +42,12 @@ type sessionHeader struct {
 }
 
 type messageRecord struct {
-	Type        string         `json:"type"`
-	V           int            `json:"v"`
-	Seq         int            `json:"seq"`
-	TS          string         `json:"ts"`
-	Interrupted bool           `json:"interrupted"`
-	Message     openai.Message `json:"message"`
+	Type        string      `json:"type"`
+	V           int         `json:"v"`
+	Seq         int         `json:"seq"`
+	TS          string      `json:"ts"`
+	Interrupted bool        `json:"interrupted"`
+	Message     llm.Message `json:"message"`
 }
 
 type modelRecord struct {
@@ -155,7 +155,7 @@ func newSessionID(now time.Time) (string, error) {
 
 // Record appends one completed message.
 // interrupted marks an assistant message cut short by cancellation.
-func (w *Writer) Record(msg openai.Message, interrupted bool) error {
+func (w *Writer) Record(msg llm.Message, interrupted bool) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.writeRecord(func(seq int) any {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 )
 
 func TestRecordShape(t *testing.T) {
@@ -27,8 +27,8 @@ func TestRecordShape(t *testing.T) {
 		t.Fatalf("file created before Record: %v", err)
 	}
 
-	user := openai.Message{Role: "user", Content: "hi"}
-	assistant := openai.Message{Role: "assistant", Content: "partial"}
+	user := llm.Message{Role: "user", Content: "hi"}
+	assistant := llm.Message{Role: "assistant", Content: "partial"}
 	if err := w.Record(user, false); err != nil {
 		t.Fatal(err)
 	}
@@ -85,12 +85,12 @@ func TestRecordShape(t *testing.T) {
 
 	for i, line := range lines[1:] {
 		var rec struct {
-			Type        string         `json:"type"`
-			V           int            `json:"v"`
-			Seq         int            `json:"seq"`
-			TS          string         `json:"ts"`
-			Interrupted bool           `json:"interrupted"`
-			Message     openai.Message `json:"message"`
+			Type        string      `json:"type"`
+			V           int         `json:"v"`
+			Seq         int         `json:"seq"`
+			TS          string      `json:"ts"`
+			Interrupted bool        `json:"interrupted"`
+			Message     llm.Message `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			t.Fatal(err)
@@ -104,8 +104,8 @@ func TestRecordShape(t *testing.T) {
 	}
 
 	var first struct {
-		Interrupted bool           `json:"interrupted"`
-		Message     openai.Message `json:"message"`
+		Interrupted bool        `json:"interrupted"`
+		Message     llm.Message `json:"message"`
 	}
 	if err := json.Unmarshal([]byte(lines[1]), &first); err != nil {
 		t.Fatal(err)
@@ -114,8 +114,8 @@ func TestRecordShape(t *testing.T) {
 		t.Fatalf("user %+v", first)
 	}
 	var second struct {
-		Interrupted bool           `json:"interrupted"`
-		Message     openai.Message `json:"message"`
+		Interrupted bool        `json:"interrupted"`
+		Message     llm.Message `json:"message"`
 	}
 	if err := json.Unmarshal([]byte(lines[2]), &second); err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestRecordFailsWhenParentIsAFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = w.Record(openai.Message{Role: "user", Content: "hi"}, false)
+	err = w.Record(llm.Message{Role: "user", Content: "hi"}, false)
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -197,7 +197,7 @@ func TestRecordModelLeavesHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Record(openai.Message{Role: "user", Content: "hi"}, false); err != nil {
+	if err := w.Record(llm.Message{Role: "user", Content: "hi"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.RecordModel("openrouter/qwen/qwen3-coder"); err != nil {
@@ -242,18 +242,18 @@ func TestResumeAppendsWithoutRewritingTheHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	call := openai.Message{
+	call := llm.Message{
 		Role: "assistant",
-		ToolCalls: []openai.ToolCall{{
+		ToolCalls: []llm.ToolCall{{
 			ID:   "call_1",
 			Type: "function",
-			Function: openai.FunctionCall{
+			Function: llm.FunctionCall{
 				Name:      "list_dir",
-				Arguments: openai.Arguments{"path": "."},
+				Arguments: llm.Arguments{"path": "."},
 			},
 		}},
 	}
-	if err := w.Record(openai.Message{Role: "user", Content: "hi"}, false); err != nil {
+	if err := w.Record(llm.Message{Role: "user", Content: "hi"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Record(call, false); err != nil {
@@ -283,7 +283,7 @@ func TestResumeAppendsWithoutRewritingTheHeader(t *testing.T) {
 	if path != "." {
 		t.Fatalf("path %q", path)
 	}
-	if err := loaded.Writer.Record(openai.Message{Role: "user", Content: "next"}, false); err != nil {
+	if err := loaded.Writer.Record(llm.Message{Role: "user", Content: "next"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := loaded.Writer.Close(); err != nil {
@@ -330,7 +330,7 @@ func TestResumeDropsATornTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Record(openai.Message{Role: "user", Content: "hi"}, false); err != nil {
+	if err := w.Record(llm.Message{Role: "user", Content: "hi"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Close(); err != nil {
@@ -351,7 +351,7 @@ func TestResumeDropsATornTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := loaded.Writer.Record(openai.Message{Role: "user", Content: "next"}, false); err != nil {
+	if err := loaded.Writer.Record(llm.Message{Role: "user", Content: "next"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := loaded.Writer.Close(); err != nil {
@@ -377,10 +377,10 @@ func TestResumeLeavesACorruptLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Record(openai.Message{Role: "user", Content: "hi"}, false); err != nil {
+	if err := w.Record(llm.Message{Role: "user", Content: "hi"}, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Record(openai.Message{Role: "assistant", Content: "ok"}, false); err != nil {
+	if err := w.Record(llm.Message{Role: "assistant", Content: "ok"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Close(); err != nil {
@@ -411,7 +411,7 @@ func TestResumeLatestUsesTheNewestFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := older.Record(openai.Message{Role: "user", Content: "old"}, false); err != nil {
+	if err := older.Record(llm.Message{Role: "user", Content: "old"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := older.Close(); err != nil {
@@ -421,7 +421,7 @@ func TestResumeLatestUsesTheNewestFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := newer.Record(openai.Message{Role: "user", Content: "new"}, false); err != nil {
+	if err := newer.Record(llm.Message{Role: "user", Content: "new"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := newer.Close(); err != nil {
@@ -471,7 +471,7 @@ func TestResumeRejectsADifferentDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Record(openai.Message{Role: "user", Content: "hi"}, false); err != nil {
+	if err := w.Record(llm.Message{Role: "user", Content: "hi"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Close(); err != nil {

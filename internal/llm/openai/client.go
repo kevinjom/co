@@ -1,3 +1,4 @@
+// Package openai is a client for an OpenAI-compatible chat-completions API.
 package openai
 
 import (
@@ -9,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/kevinjom/co/internal/llm"
 )
 
 const maxResponseBytes = 8 << 20
@@ -16,34 +19,28 @@ const maxResponseBytes = 8 << 20
 // defaultReasoningEffort is sent as reasoning_effort on every chat request.
 const defaultReasoningEffort = "low"
 
-// Compat selects optional OpenAI-compatible fields.
-// ReasoningEffort sends reasoning_effort on each chat request.
-// ReasoningDelta reads the reasoning field from stream chunks.
-type Compat struct {
-	ReasoningEffort bool
-	ReasoningDelta  bool
-}
-
 // Client talks to one OpenAI-compatible chat endpoint.
 type Client struct {
 	baseURL string
 	apiKey  string
-	compat  Compat
+	compat  llm.Compat
 	http    *http.Client
 }
+
+var _ llm.Chatter = (*Client)(nil)
 
 // New returns a client for baseURL with no API key.
 // A trailing slash is ignored.
 // Reasoning effort and the reasoning delta are enabled.
 func New(baseURL string) *Client {
-	return NewEndpoint(baseURL, "", Compat{
+	return NewEndpoint(baseURL, "", llm.Compat{
 		ReasoningEffort: true,
 		ReasoningDelta:  true,
 	})
 }
 
 // NewEndpoint returns a client for one provider endpoint.
-func NewEndpoint(baseURL, apiKey string, compat Compat) *Client {
+func NewEndpoint(baseURL, apiKey string, compat llm.Compat) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		apiKey:  apiKey,
@@ -53,18 +50,18 @@ func NewEndpoint(baseURL, apiKey string, compat Compat) *Client {
 }
 
 type chatRequest struct {
-	Model           string    `json:"model"`
-	Messages        []Message `json:"messages"`
-	Tools           []Tool    `json:"tools,omitempty"`
-	Stream          bool      `json:"stream"`
-	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
+	Model           string        `json:"model"`
+	Messages        []llm.Message `json:"messages"`
+	Tools           []llm.Tool    `json:"tools,omitempty"`
+	Stream          bool          `json:"stream"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
 }
 
 // apiMessage decodes a choice. Content is null when the model only calls tools.
 type apiMessage struct {
-	Role      string     `json:"role"`
-	Content   *string    `json:"content"`
-	ToolCalls []ToolCall `json:"tool_calls"`
+	Role      string         `json:"role"`
+	Content   *string        `json:"content"`
+	ToolCalls []llm.ToolCall `json:"tool_calls"`
 }
 
 // Show checks that the server is up and the model is present.
@@ -105,12 +102,12 @@ func (c *Client) List(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-func (m apiMessage) message() Message {
+func (m apiMessage) message() llm.Message {
 	content := ""
 	if m.Content != nil {
 		content = *m.Content
 	}
-	msg := Message{
+	msg := llm.Message{
 		Role:      m.Role,
 		Content:   content,
 		ToolCalls: m.ToolCalls,
@@ -119,7 +116,7 @@ func (m apiMessage) message() Message {
 		msg.Role = "assistant"
 	}
 	if msg.ToolCalls == nil {
-		msg.ToolCalls = []ToolCall{}
+		msg.ToolCalls = []llm.ToolCall{}
 	}
 	for i := range msg.ToolCalls {
 		if msg.ToolCalls[i].ID == "" {
@@ -129,7 +126,7 @@ func (m apiMessage) message() Message {
 			msg.ToolCalls[i].Type = "function"
 		}
 		if msg.ToolCalls[i].Function.Arguments == nil {
-			msg.ToolCalls[i].Function.Arguments = Arguments{}
+			msg.ToolCalls[i].Function.Arguments = llm.Arguments{}
 		}
 	}
 	return msg

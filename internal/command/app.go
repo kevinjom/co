@@ -8,8 +8,9 @@ import (
 
 	"github.com/kevinjom/co/internal/agent"
 	"github.com/kevinjom/co/internal/config"
+	"github.com/kevinjom/co/internal/llm"
+	"github.com/kevinjom/co/internal/llm/openai"
 	"github.com/kevinjom/co/internal/lsp"
-	"github.com/kevinjom/co/internal/openai"
 	"github.com/kevinjom/co/internal/provider"
 	"github.com/kevinjom/co/internal/skill"
 	"github.com/kevinjom/co/internal/transcript"
@@ -255,7 +256,7 @@ func (a *App) attach(client *openai.Client, wire, ref string) (*agent.Session, e
 	return session, nil
 }
 
-func (a *App) newSession(client agent.Chatter, wire string, recorder agent.Recorder) *agent.Session {
+func (a *App) newSession(client llm.Chatter, wire string, recorder agent.Recorder) *agent.Session {
 	session := agent.NewSession(client, wire, a.cwd, recorder)
 	session.SetCatalog(a.skills)
 	session.SetMaxToolRounds(a.maxToolRounds)

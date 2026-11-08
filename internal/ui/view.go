@@ -389,27 +389,66 @@ func renderReasoning(body string, width int, th theme) string {
 	return renderInset(label+"\n"+body, width)
 }
 
+const toolResultLines = 8
+
 func renderTool(block block, width int, th theme) string {
+	inner := insetWidth(width)
+	parts := []string{}
 	if block.tool == "bash" {
-		return renderBash(block, width, th)
+		parts = append(parts, renderBashLines(block, inner, th)...)
+	} else {
+		parts = append(parts, toolLine(block, th))
 	}
-	return renderInset(clampWidth(toolLine(block, th), insetWidth(width)), width)
+	if block.done {
+		if body := renderToolResult(block, inner, th); body != "" {
+			parts = append(parts, body)
+		}
+	}
+	return renderInset(clampWidth(strings.Join(parts, "\n"), inner), width)
 }
 
-func renderBash(block block, width int, th theme) string {
+func renderBashLines(block block, width int, th theme) []string {
 	head := block
 	head.detail = ""
-	line := toolLine(head, th)
+	lines := []string{toolLine(head, th)}
 	command := strings.TrimSpace(block.detail)
 	if command == "" {
-		return renderInset(line, width)
+		return lines
 	}
 	ink := th.dim
 	if block.failed {
 		ink = th.bad
 	}
-	body := ink.Render(wrapText(command, insetWidth(width)))
-	return renderInset(line+"\n"+body, width)
+	return append(lines, ink.Render(wrapText(command, width)))
+}
+
+func renderToolResult(block block, width int, th theme) string {
+	clipped, more := clipLines(block.result, toolResultLines)
+	if clipped == "" {
+		return ""
+	}
+	ink := th.code
+	if block.failed {
+		ink = th.bad
+	}
+	body := ink.Render(wrapText(clipped, width))
+	if more {
+		body += "\n" + ink.Render("…")
+	}
+	return body
+}
+
+func clipLines(text string, n int) (string, bool) {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.TrimRight(text, "\n")
+	if strings.TrimSpace(text) == "" || n < 1 {
+		return "", false
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) <= n {
+		return text, false
+	}
+	return strings.Join(lines[:n], "\n"), true
 }
 
 func toolLine(block block, th theme) string {

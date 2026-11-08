@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -40,7 +40,7 @@ type ProviderSpec struct {
 	BaseURL        string
 	AuthNone       bool
 	Models         []string
-	CompatOnCreate *openai.Compat
+	CompatOnCreate *llm.Compat
 	Model          string
 	DefaultModel   string
 }
@@ -341,7 +341,7 @@ func seqNode(items []string) *yaml.Node {
 	return node
 }
 
-func compatNode(compat *openai.Compat) *yaml.Node {
+func compatNode(compat *llm.Compat) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	setNode(node, "reasoning_effort", boolNode(compat.ReasoningEffort))
 	setNode(node, "reasoning_delta", boolNode(compat.ReasoningDelta))

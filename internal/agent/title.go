@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 	"github.com/kevinjom/co/internal/transcript"
 )
 
@@ -122,10 +122,10 @@ func (s *Session) refineTitle(userText string) {
 	}()
 }
 
-func chatTitle(client Chatter, model, prompt string) (string, error) {
+func chatTitle(client llm.Chatter, model, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), titleTimeout)
 	defer cancel()
-	msg, err := client.ChatStream(ctx, model, []openai.Message{
+	msg, err := client.ChatStream(ctx, model, []llm.Message{
 		{Role: "system", Content: titleSystem},
 		{Role: "user", Content: clipRunes(prompt, titleRunes)},
 	}, nil, nil)

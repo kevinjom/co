@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,7 +16,7 @@ type Provider struct {
 	APIKeyEnv string
 	AuthNone  bool
 	Models    []string
-	Compat    openai.Compat
+	Compat    llm.Compat
 }
 
 // NeedsKey reports whether a selection requires an API key.

@@ -14,6 +14,15 @@ import (
 
 const maxGrepMatches = 50
 
+func init() {
+	registerDetail("grep", grepDetail)
+}
+
+func grepDetail(args map[string]any) string {
+	pattern, _ := args["pattern"].(string)
+	return fmt.Sprintf("pattern=%q", pattern)
+}
+
 func grepSchema() Schema {
 	return Schema{
 		Name:        "grep",

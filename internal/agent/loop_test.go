@@ -14,7 +14,8 @@ import (
 	"time"
 
 	"github.com/kevinjom/co/internal/config"
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
+	"github.com/kevinjom/co/internal/llm/openai"
 )
 
 func writeSSE(w http.ResponseWriter, chunks ...string) {
@@ -60,6 +61,7 @@ func toolChunk(id, name, arguments string) string {
 type recordedChat struct {
 	Messages []struct {
 		Role       string `json:"role"`
+		Content    string `json:"content"`
 		ToolCallID string `json:"tool_call_id"`
 		ToolCalls  []struct {
 			ID       string `json:"id"`
@@ -160,7 +162,7 @@ func TestTurnRunsToolThenAnswers(t *testing.T) {
 		t.Fatalf("assistant tool call %+v", assistant.ToolCalls)
 	}
 	toolMsg := followUp[3]
-	if toolMsg.Role != "tool" || toolMsg.ToolCallID != assistant.ToolCalls[0].ID {
+	if toolMsg.Role != "tool" || toolMsg.ToolCallID != assistant.ToolCalls[0].ID || toolMsg.Content != done.Output {
 		t.Fatalf("tool message %+v", toolMsg)
 	}
 }
@@ -312,23 +314,23 @@ func TestTurnReportsToolFailure(t *testing.T) {
 	if got != "the file is missing" {
 		t.Fatalf("answer %q", got)
 	}
-	if done.ID != "call_read" || done.Err == nil {
+	if done.ID != "call_read" || done.Err == nil || !strings.HasPrefix(done.Output, "error:") {
 		t.Fatalf("done %+v", done)
 	}
 	toolMsg := session.messages[len(session.messages)-2]
-	if toolMsg.Role != "tool" || !strings.HasPrefix(toolMsg.Content, "error:") {
+	if toolMsg.Role != "tool" || toolMsg.Content != done.Output {
 		t.Fatalf("tool message %+v", toolMsg)
 	}
 }
 
 type memRecorder struct {
-	msgs        []openai.Message
+	msgs        []llm.Message
 	interrupted []bool
 	fail        error
 	calls       int
 }
 
-func (m *memRecorder) Record(msg openai.Message, interrupted bool) error {
+func (m *memRecorder) Record(msg llm.Message, interrupted bool) error {
 	m.calls++
 	if m.fail != nil {
 		return m.fail
@@ -522,23 +524,23 @@ func TestTurnStopsWhenContextIsCanceled(t *testing.T) {
 
 type scriptChat struct {
 	model string
-	seen  [][]openai.Message
+	seen  [][]llm.Message
 }
 
 func (s *scriptChat) ChatStream(
 	_ context.Context,
 	model string,
-	messages []openai.Message,
-	_ []openai.Tool,
-	onChunk func(openai.StreamKind, string),
-) (openai.Message, error) {
+	messages []llm.Message,
+	_ []llm.Tool,
+	onChunk func(llm.StreamKind, string),
+) (llm.Message, error) {
 	s.model = model
-	copied := append([]openai.Message{}, messages...)
+	copied := append([]llm.Message{}, messages...)
 	s.seen = append(s.seen, copied)
 	if onChunk != nil {
-		onChunk(openai.StreamContent, "ok")
+		onChunk(llm.StreamContent, "ok")
 	}
-	return openai.Message{Role: "assistant", Content: "ok"}, nil
+	return llm.Message{Role: "assistant", Content: "ok"}, nil
 }
 
 func TestSetModelKeepsMessages(t *testing.T) {
@@ -574,7 +576,7 @@ func TestRestoreIsSentOnTheNextTurn(t *testing.T) {
 	rec := &memRecorder{}
 	chat := &scriptChat{}
 	session := NewSession(chat, "test-model", t.TempDir(), rec)
-	session.Restore([]openai.Message{
+	session.Restore([]llm.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
 	})

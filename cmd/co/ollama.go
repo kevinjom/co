@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 	"github.com/kevinjom/co/internal/provider"
 
 	"github.com/spf13/cobra"
@@ -108,7 +108,7 @@ func runOllama(cmd *cobra.Command, _ []string) error {
 		AuthNone: true,
 		Models:   installed,
 		Model:    "ollama/" + chosen,
-		CompatOnCreate: &openai.Compat{
+		CompatOnCreate: &llm.Compat{
 			ReasoningEffort: true,
 			ReasoningDelta:  true,
 		},

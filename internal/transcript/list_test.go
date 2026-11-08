@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 )
 
 func TestListReturnsNewestFirst(t *testing.T) {
@@ -20,7 +20,7 @@ func TestListReturnsNewestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := newer.Record(openai.Message{Role: "user", Content: "new prompt"}, false); err != nil {
+	if err := newer.Record(llm.Message{Role: "user", Content: "new prompt"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := newer.RecordModel("openrouter/qwen/qwen3-coder"); err != nil {
@@ -173,7 +173,7 @@ func TestListPrefersTheStoredTitle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Record(openai.Message{Role: "user", Content: "please fix the parser and add tests"}, false); err != nil {
+	if err := w.Record(llm.Message{Role: "user", Content: "please fix the parser and add tests"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.RecordTitle("Fix the parser"); err != nil {
@@ -239,10 +239,10 @@ func writeSession(t *testing.T, home, dir, model, prompt string) *Writer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Record(openai.Message{Role: "user", Content: prompt}, false); err != nil {
+	if err := w.Record(llm.Message{Role: "user", Content: prompt}, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Record(openai.Message{Role: "assistant", Content: "reply"}, false); err != nil {
+	if err := w.Record(llm.Message{Role: "assistant", Content: "reply"}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Close(); err != nil {

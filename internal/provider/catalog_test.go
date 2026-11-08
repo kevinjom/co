@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kevinjom/co/internal/openai"
+	"github.com/kevinjom/co/internal/llm"
 )
 
 func TestParse(t *testing.T) {
@@ -411,7 +411,7 @@ func TestWriteProviderCreatesAndRefreshes(t *testing.T) {
 		BaseURL:  "http://127.0.0.1:11434/",
 		AuthNone: true,
 		Models:   []string{"b", "a"},
-		CompatOnCreate: &openai.Compat{
+		CompatOnCreate: &llm.Compat{
 			ReasoningEffort: true,
 			ReasoningDelta:  true,
 		},
@@ -454,7 +454,7 @@ providers:
 		BaseURL:  "http://127.0.0.1:11434",
 		AuthNone: true,
 		Models:   []string{"qwen3:8b"},
-		CompatOnCreate: &openai.Compat{
+		CompatOnCreate: &llm.Compat{
 			ReasoningEffort: true,
 			ReasoningDelta:  true,
 		},

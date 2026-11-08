@@ -11,6 +11,18 @@ import (
 
 const maxFetchBytes = 32 * 1024
 
+func init() {
+	registerDetail("web_fetch", webFetchDetail)
+}
+
+func webFetchDetail(args map[string]any) string {
+	raw, _ := args["url"].(string)
+	if strings.TrimSpace(raw) == "" {
+		return "url="
+	}
+	return raw
+}
+
 func webFetchSchema() Schema {
 	return Schema{
 		Name:        "web_fetch",

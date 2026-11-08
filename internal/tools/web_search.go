@@ -29,6 +29,15 @@ const duckDuckGoUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:128.0) Ge
 
 var webClient = &http.Client{Timeout: 30 * time.Second}
 
+func init() {
+	registerDetail("web_search", webSearchDetail)
+}
+
+func webSearchDetail(args map[string]any) string {
+	query, _ := args["query"].(string)
+	return fmt.Sprintf("query=%q", query)
+}
+
 func webSearchSchema() Schema {
 	return Schema{
 		Name:        "web_search",

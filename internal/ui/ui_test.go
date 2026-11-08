@@ -311,13 +311,80 @@ func TestToolErrorMarksTheLine(t *testing.T) {
 	m.tab().turnID = 1
 	m.tab().busy = true
 	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ToolStart{ID: "call_1", Name: "read_file", Detail: "path=missing"}})
-	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ToolDone{ID: "call_1", Err: errors.New("missing")}})
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ToolDone{ID: "call_1", Output: "error: missing", Err: errors.New("missing")}})
 	if len(m.tab().blocks) != 1 || !m.tab().blocks[0].failed || !m.tab().blocks[0].done {
 		t.Fatalf("blocks %+v", m.tab().blocks)
 	}
 	plain := ansi.Strip(m.renderTranscript())
-	if !strings.Contains(plain, "Read") || !strings.Contains(plain, "path=missing") {
+	if !strings.Contains(plain, "Read") || !strings.Contains(plain, "path=missing") || !strings.Contains(plain, "error: missing") {
 		t.Fatalf("transcript %q", plain)
+	}
+}
+
+func TestToolResultAppearsWhenTheCallFinishes(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().turnID = 1
+	m.tab().busy = true
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ToolStart{ID: "call_1", Name: "read_file", Detail: "path=main.go"}})
+	if strings.Contains(ansi.Strip(m.renderTranscript()), "package main") {
+		t.Fatal("running tool showed a result")
+	}
+	m.Update(eventMsg{tabID: 1, id: 1, event: agent.ToolDone{ID: "call_1", Output: "package main"}})
+	plain := ansi.Strip(m.renderTranscript())
+	if !strings.Contains(plain, "Read") || !strings.Contains(plain, "path=main.go") || !strings.Contains(plain, "package main") {
+		t.Fatalf("transcript %q", plain)
+	}
+	if strings.Contains(plain, "…") {
+		t.Fatalf("short result clipped: %q", plain)
+	}
+}
+
+func TestToolResultClipsAndStaysLiteral(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().blocks = []block{{
+		kind:   blockTool,
+		tool:   "read_file",
+		detail: "path=main.go",
+		result: "# Title\n\n**bold**\n\n```go\nfunc main() {}\n```\nline 8\nline 9",
+		done:   true,
+	}}
+	plain := ansi.Strip(m.renderTranscript())
+	for _, want := range []string{"# Title", "**bold**", "```go", "func main() {}", "line 8", "…"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("missing %q in %q", want, plain)
+		}
+	}
+	if strings.Contains(plain, "line 9") {
+		t.Fatalf("ninth line kept: %q", plain)
+	}
+}
+
+func TestHistoryRestoresToolResult(t *testing.T) {
+	session := agent.NewSession(openai.New("http://127.0.0.1:1"), "test-model", t.TempDir(), nil)
+	session.Restore([]llm.Message{
+		{Role: "user", Content: "read it"},
+		{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{{
+				ID: "c1",
+				Function: llm.FunctionCall{
+					Name:      "bash",
+					Arguments: llm.Arguments{"command": "echo hi\necho there"},
+				},
+			}},
+		},
+		{Role: "tool", ToolCallID: "c1", Content: "exit: 0\nhi\nthere"},
+	})
+	blocks := historyBlocks(session)
+	var found block
+	for _, item := range blocks {
+		if item.kind == blockTool {
+			found = item
+			break
+		}
+	}
+	if !found.done || found.detail != "echo hi echo there" || found.result != "exit: 0\nhi\nthere" {
+		t.Fatalf("tool block %+v", found)
 	}
 }
 

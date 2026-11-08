@@ -17,6 +17,7 @@ type theme struct {
 	good        lipgloss.Style
 	dim         lipgloss.Style
 	bad         lipgloss.Style
+	code        lipgloss.Style
 	accentColor color.Color
 	warnColor   color.Color
 	blurBorder  color.Color
@@ -48,6 +49,7 @@ func newTheme(name string, dark bool) (theme, error) {
 		good:        lipgloss.NewStyle().Foreground(lipgloss.Color(colors.Good)),
 		dim:         lipgloss.NewStyle().Foreground(faint),
 		bad:         lipgloss.NewStyle().Foreground(lipgloss.Color(colors.Bad)),
+		code:        lipgloss.NewStyle().Foreground(lipgloss.Color(colors.Code)),
 		accentColor: accent,
 		warnColor:   warn,
 		blurBorder:  lipgloss.Color(colors.Blur),

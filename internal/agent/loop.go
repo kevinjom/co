@@ -223,10 +223,10 @@ func (s *Session) runTools(ctx context.Context, calls []llm.ToolCall, observe Ob
 		emit(observe, ToolStart{
 			ID:     call.ID,
 			Name:   call.Function.Name,
-			Detail: ToolDetail(call),
+			Detail: tools.Detail(call.Function.Name, map[string]any(call.Function.Arguments)),
 		})
 		result, toolErr := s.tools.Run(ctx, call.Function.Name, map[string]any(call.Function.Arguments))
-		emit(observe, ToolDone{ID: call.ID, Err: toolErr})
+		emit(observe, ToolDone{ID: call.ID, Output: result, Err: toolErr})
 		s.remember(llm.Message{
 			Role:       "tool",
 			Content:    result,
@@ -258,64 +258,4 @@ func toolDefinitions(set *tools.Set) []llm.Tool {
 		})
 	}
 	return defs
-}
-
-// ToolDetail is the short argument summary shown for a tool call.
-func ToolDetail(call llm.ToolCall) string {
-	args := call.Function.Arguments
-	if args == nil {
-		args = llm.Arguments{}
-	}
-
-	switch call.Function.Name {
-	case "grep":
-		pattern, _ := args["pattern"].(string)
-		return fmt.Sprintf("pattern=%q", pattern)
-	case "web_search":
-		query, _ := args["query"].(string)
-		return fmt.Sprintf("query=%q", query)
-	case "web_fetch":
-		raw, _ := args["url"].(string)
-		if strings.TrimSpace(raw) == "" {
-			return "url="
-		}
-		return raw
-	case "bash":
-		command, _ := args["command"].(string)
-		return oneLine(command)
-	case "lsp_definition", "lsp_references", "lsp_hover":
-		return fmt.Sprintf("%s:%d:%d", detailPath(args), detailInt(args["line"]), detailInt(args["column"]))
-	case "lsp_symbols":
-		if query, _ := args["query"].(string); strings.TrimSpace(query) != "" {
-			return fmt.Sprintf("query=%q", query)
-		}
-		return "path=" + detailPath(args)
-	case "lsp_diagnostics":
-		path, _ := args["path"].(string)
-		if strings.TrimSpace(path) == "" {
-			return "workspace"
-		}
-		return "path=" + path
-	default:
-		return "path=" + detailPath(args)
-	}
-}
-
-func detailPath(args llm.Arguments) string {
-	path, _ := args["path"].(string)
-	if strings.TrimSpace(path) == "" {
-		return "."
-	}
-	return path
-}
-
-func detailInt(v any) int {
-	switch n := v.(type) {
-	case float64:
-		return int(n)
-	case int:
-		return n
-	default:
-		return 0
-	}
 }

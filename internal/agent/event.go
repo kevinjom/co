@@ -32,10 +32,11 @@ type ToolStart struct {
 func (ToolStart) event() {}
 
 // ToolDone is emitted after a tool returns.
-// Err is set when the tool failed. The model still receives the failure as text.
+// Output is the text the model receives. Err is set when the tool failed.
 type ToolDone struct {
-	ID  string
-	Err error
+	ID     string
+	Output string
+	Err    error
 }
 
 func (ToolDone) event() {}

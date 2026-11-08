@@ -21,6 +21,7 @@ import (
 
 	"github.com/kevinjom/co/internal/agent"
 	"github.com/kevinjom/co/internal/command"
+	"github.com/kevinjom/co/internal/tools"
 )
 
 const paintGap = time.Second / 30
@@ -41,6 +42,7 @@ type block struct {
 	text   string
 	tool   string
 	detail string
+	result string
 	toolID string
 	failed bool
 	done   bool
@@ -196,7 +198,7 @@ func historyBlocks(session *agent.Session) []block {
 				blocks = append(blocks, block{
 					kind:   blockTool,
 					tool:   call.Function.Name,
-					detail: agent.ToolDetail(call),
+					detail: tools.Detail(call.Function.Name, map[string]any(call.Function.Arguments)),
 					toolID: call.ID,
 				})
 			}
@@ -207,6 +209,7 @@ func historyBlocks(session *agent.Session) []block {
 			for i := range blocks {
 				if blocks[i].kind == blockTool && !blocks[i].done && blocks[i].toolID == msg.ToolCallID {
 					blocks[i].done = true
+					blocks[i].result = msg.Content
 					break
 				}
 			}
@@ -910,6 +913,7 @@ func (m *model) markTool(item *tab, ev agent.ToolDone) {
 		if item.blocks[i].kind == blockTool && item.blocks[i].toolID == ev.ID {
 			item.blocks[i].done = true
 			item.blocks[i].failed = ev.Err != nil
+			item.blocks[i].result = ev.Output
 			return
 		}
 	}

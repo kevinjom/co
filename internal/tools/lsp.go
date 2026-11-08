@@ -33,6 +33,33 @@ func (s *Set) EnableLSP(lang Language) {
 	)
 }
 
+func init() {
+	registerDetail("lsp_definition", positionDetail)
+	registerDetail("lsp_references", positionDetail)
+	registerDetail("lsp_hover", positionDetail)
+	registerDetail("lsp_symbols", symbolsDetail)
+	registerDetail("lsp_diagnostics", diagnosticsDetail)
+}
+
+func positionDetail(args map[string]any) string {
+	return fmt.Sprintf("%s:%d:%d", detailPath(args), detailInt(args["line"]), detailInt(args["column"]))
+}
+
+func symbolsDetail(args map[string]any) string {
+	if query, _ := args["query"].(string); strings.TrimSpace(query) != "" {
+		return fmt.Sprintf("query=%q", query)
+	}
+	return "path=" + detailPath(args)
+}
+
+func diagnosticsDetail(args map[string]any) string {
+	path, _ := args["path"].(string)
+	if strings.TrimSpace(path) == "" {
+		return "workspace"
+	}
+	return "path=" + path
+}
+
 func lspDefinitionSchema() Schema {
 	return Schema{
 		Name:        "lsp_definition",

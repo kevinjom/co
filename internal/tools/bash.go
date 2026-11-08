@@ -25,6 +25,15 @@ type bashSpec struct {
 	env     []string
 }
 
+func init() {
+	registerDetail("bash", bashDetail)
+}
+
+func bashDetail(args map[string]any) string {
+	command, _ := args["command"].(string)
+	return strings.Join(strings.Fields(command), " ")
+}
+
 func bashSchema() Schema {
 	return Schema{
 		Name: "bash",

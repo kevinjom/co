@@ -61,6 +61,7 @@ func toolChunk(id, name, arguments string) string {
 type recordedChat struct {
 	Messages []struct {
 		Role       string `json:"role"`
+		Content    string `json:"content"`
 		ToolCallID string `json:"tool_call_id"`
 		ToolCalls  []struct {
 			ID       string `json:"id"`
@@ -161,7 +162,7 @@ func TestTurnRunsToolThenAnswers(t *testing.T) {
 		t.Fatalf("assistant tool call %+v", assistant.ToolCalls)
 	}
 	toolMsg := followUp[3]
-	if toolMsg.Role != "tool" || toolMsg.ToolCallID != assistant.ToolCalls[0].ID {
+	if toolMsg.Role != "tool" || toolMsg.ToolCallID != assistant.ToolCalls[0].ID || toolMsg.Content != done.Output {
 		t.Fatalf("tool message %+v", toolMsg)
 	}
 }
@@ -313,11 +314,11 @@ func TestTurnReportsToolFailure(t *testing.T) {
 	if got != "the file is missing" {
 		t.Fatalf("answer %q", got)
 	}
-	if done.ID != "call_read" || done.Err == nil {
+	if done.ID != "call_read" || done.Err == nil || !strings.HasPrefix(done.Output, "error:") {
 		t.Fatalf("done %+v", done)
 	}
 	toolMsg := session.messages[len(session.messages)-2]
-	if toolMsg.Role != "tool" || !strings.HasPrefix(toolMsg.Content, "error:") {
+	if toolMsg.Role != "tool" || toolMsg.Content != done.Output {
 		t.Fatalf("tool message %+v", toolMsg)
 	}
 }

@@ -1,4 +1,4 @@
-package ui
+package tui
 
 import (
 	"os"
@@ -61,9 +61,9 @@ func TestListProjectFilesRejectsAFile(t *testing.T) {
 }
 
 func TestRankFilesUsesFuzzyMatch(t *testing.T) {
-	paths := []string{"readme.md", "internal/note.go", "internal/ui/markdown.go"}
+	paths := []string{"readme.md", "internal/note.go", "internal/tui/markdown.go"}
 	hits := rankFiles(paths, "")
-	if len(hits) != len(paths) || hits[0].path != "readme.md" || hits[2].path != "internal/ui/markdown.go" {
+	if len(hits) != len(paths) || hits[0].path != "readme.md" || hits[2].path != "internal/tui/markdown.go" {
 		t.Fatalf("order %#v", hits)
 	}
 

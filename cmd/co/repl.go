@@ -12,7 +12,7 @@ import (
 	"github.com/kevinjom/co/internal/agent"
 	"github.com/kevinjom/co/internal/command"
 	"github.com/kevinjom/co/internal/theme"
-	"github.com/kevinjom/co/internal/ui"
+	"github.com/kevinjom/co/internal/tui"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -20,7 +20,7 @@ import (
 
 func repl(cmd *cobra.Command, signals *signalSession, app *command.App, cwd string, clearScrollback bool, themeName string) error {
 	if isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout()) {
-		err := ui.Run(signals.ctx, app, cwd, clearScrollback, themeName)
+		err := tui.Run(signals.ctx, app, cwd, clearScrollback, themeName)
 		if err != nil && signals.ctx.Err() != nil {
 			return signals.err()
 		}

@@ -13,13 +13,11 @@ A terminal on both stdin and stdout gets a Bubble Tea TUI, which can hold more t
 
 ## Install
 
-Go 1.26.4 or newer.
-
-```sh
-go install github.com/kevinjom/co/cmd/co@latest
+curl -fsSL https://raw.githubusercontent.com/kevinjom/co/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/kevinjom/co/main/install.sh | sh -s -- 0.1.0
 ```
 
-To build from a checkout:
+To build from a checkout, Go 1.26.4 or newer:
 
 ```sh
 git clone https://github.com/kevinjom/co.git
@@ -27,7 +25,13 @@ cd co
 go build -o co ./cmd/co
 ```
 
-`co version` prints the version, commit, and build date. Those stay `dev`, `unknown`, and `unknown` unless you set them:
+The same toolchain installs the latest commit:
+
+```sh
+go install github.com/kevinjom/co/cmd/co@latest
+```
+
+A binary from `go build` or `go install` prints `dev`, `unknown`, and `unknown` unless you set them:
 
 ```sh
 go build -ldflags "-X main.version=0.1.0 -X main.commit=$(git rev-parse --short HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o co ./cmd/co

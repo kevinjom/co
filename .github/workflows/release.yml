@@ -38,9 +38,15 @@ jobs:
           ldflags="-X main.version=${version} -X main.commit=${commit} -X main.date=${date}"
           mkdir -p dist
           for pair in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
-            GOOS="${pair%/*}" GOARCH="${pair#*/}" CGO_ENABLED=0 \
-              go build -ldflags "$ldflags" -o "dist/co_${version}_${GOOS}_${GOARCH}" ./cmd/co
+            os="${pair%/*}"
+            arch="${pair#*/}"
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
+              go build -ldflags "$ldflags" -o "dist/co_${version}_${os}_${arch}" ./cmd/co
           done
+          test -f "dist/co_${version}_darwin_arm64"
+          test -f "dist/co_${version}_darwin_amd64"
+          test -f "dist/co_${version}_linux_amd64"
+          test -f "dist/co_${version}_linux_arm64"
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

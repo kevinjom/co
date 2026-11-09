@@ -33,7 +33,7 @@ go build -o co ./cmd/co
 go build -ldflags "-X main.version=0.1.0 -X main.commit=$(git rev-parse --short HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o co ./cmd/co
 ```
 
-## Ollama
+## Run locally with Ollama
 
 With the `ollama` binary installed:
 
@@ -41,7 +41,7 @@ With the `ollama` binary installed:
 co ollama
 ```
 
-This talks to `http://127.0.0.1:11434`, starts a local daemon when it is down, and asks you to pick a model when none is already loaded. It writes an `ollama` provider into `~/.co/models.yaml`, the chosen model into `~/.co/config.yaml`, and, in a terminal, opens the session on that model.
+This talks to `http://127.0.0.1:11434`, starts a local daemon when it is down, and asks you to pick a model when none is already loaded. It adds an `ollama` provider to `~/.co/models.yaml` and leaves every other provider in that file, writes the chosen model into `~/.co/config.yaml`, and, in a terminal, opens the session on that model.
 
 ```sh
 co ollama --host http://127.0.0.1:11434
@@ -53,7 +53,39 @@ co ollama --host http://127.0.0.1:11434
 
 Providers live in YAML. A model is `provider/model-id`. The model id may contain further slashes, as in `openrouter/qwen/qwen3-coder`.
 
-`~/.co/config.yaml` is the settings file. It holds the default model and the flags that are safe to keep:
+The first run creates `~/.co/config.yaml` and `~/.co/models.yaml` when either file is missing. A later run leaves an existing file as it is. `--config` does not create the home files.
+
+`~/.co/models.yaml` is the provider catalog. A generated file starts with Gemini and OpenRouter. `co ollama` adds the `ollama` provider beside them:
+
+```yaml
+providers:
+  gemini:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key_env: GEMINI_API_KEY
+    models:
+      - gemini-flash-latest
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    models:
+      - qwen/qwen3-coder
+  ollama:
+    base_url: http://127.0.0.1:11434
+    auth: none
+    models:
+      - qwen3:8b
+    compat:
+      reasoning_effort: true
+      reasoning_delta: true
+```
+
+`base_url` is required. If it already ends in `/v1` or `/openai`, `co` calls `/chat/completions` on it. Otherwise it calls `/v1/chat/completions`, which is what an Ollama host needs.
+
+`auth: none` means the provider takes no API key. Any other provider needs one. `api_key_env` names an environment variable that is checked first.
+
+`compat.reasoning_effort` sends `reasoning_effort: low` on each request. `compat.reasoning_delta` reads a `reasoning` field from stream chunks and shows it while the model thinks. `co ollama` turns both on when it creates the provider.
+
+`~/.co/config.yaml` is the settings file. It holds the default model and the flags that are safe to keep. The generated file has the flags below and no `model` key. Choosing a model adds that key:
 
 ```yaml
 model: openrouter/qwen/qwen3-coder
@@ -66,31 +98,6 @@ max-tool-rounds: 64
 ```
 
 `theme` is the TUI palette: `teal`, `amber`, `rose`, `sky`, `violet`, or `ink`. The default is `teal`. Each palette has a light side and a dark side, and the TUI picks the side from the terminal background. `log-level` is `debug`, `info`, `warn`, or `error`. Log lines go to `~/.co/logs/co-YYYY-MM-DD.log`, using the local date. `log-retention-days` is how many of those daily files to keep, including today. The default is 3. There is no flag for it. A file from an older day is removed when `co` starts. After midnight, the next log line opens that day's file and removes files outside the window. `no-history` skips the transcript. `clear-scrollback` erases the terminal scrollback before the TUI starts. `max-tool-rounds` is how many model calls in a turn may include tools. After that many, one more call is made with no tools. The default is 64. A flag or its environment variable wins over the file. `resume` is not read from the file.
-
-`~/.co/models.yaml` is the provider catalog:
-
-```yaml
-providers:
-  ollama:
-    base_url: http://127.0.0.1:11434
-    auth: none
-    models:
-      - qwen3:8b
-    compat:
-      reasoning_effort: true
-      reasoning_delta: true
-  openrouter:
-    base_url: https://openrouter.ai/api/v1
-    api_key_env: OPENROUTER_API_KEY
-    models:
-      - qwen/qwen3-coder
-```
-
-`base_url` is required. If it already ends in `/v1` or `/openai`, `co` calls `/chat/completions` on it. Otherwise it calls `/v1/chat/completions`, which is what an Ollama host needs.
-
-`auth: none` means the provider takes no API key. Any other provider needs one. `api_key_env` names an environment variable that is checked first.
-
-`compat.reasoning_effort` sends `reasoning_effort: low` on each request. `compat.reasoning_delta` reads a `reasoning` field from stream chunks and shows it while the model thinks. `co ollama` turns both on when it creates the provider.
 
 ### Which file is used
 

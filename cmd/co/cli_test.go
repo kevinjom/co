@@ -401,6 +401,63 @@ func TestConfigMaxToolRoundsStopsToolCalls(t *testing.T) {
 	}
 }
 
+func TestStartupWritesDefaultFiles(t *testing.T) {
+	prepare(t)
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	configText := readHomeConfig(t)
+	if !strings.Contains(configText, "theme: teal") || !strings.Contains(configText, "log-level: info") || !strings.Contains(configText, "max-tool-rounds: 64") {
+		t.Fatalf("config:\n%s", configText)
+	}
+	if strings.Contains(configText, "model:") || strings.Contains(configText, "providers:") {
+		t.Fatalf("config:\n%s", configText)
+	}
+	modelsText := readHomeModels(t)
+	if !strings.Contains(modelsText, "gemini:") || !strings.Contains(modelsText, "GEMINI_API_KEY") || !strings.Contains(modelsText, "gemini-flash-latest") {
+		t.Fatalf("models:\n%s", modelsText)
+	}
+	if !strings.Contains(modelsText, "openrouter:") || !strings.Contains(modelsText, "OPENROUTER_API_KEY") || !strings.Contains(modelsText, "qwen/qwen3-coder") {
+		t.Fatalf("models:\n%s", modelsText)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keptConfig := "log-level: error\n"
+	keptModels := "providers:\n  kept:\n    base_url: http://kept.example/v1\n    auth: none\n    models:\n      - a\n"
+	writeHomeFile(t, provider.HomeConfig(home), keptConfig)
+	writeHomeFile(t, provider.HomeModels(home), keptModels)
+	if _, _, err := startCLI(t, "", "version"); err != nil {
+		t.Fatal(err)
+	}
+	if readHomeConfig(t) != keptConfig || readHomeModels(t) != keptModels {
+		t.Fatalf("config:\n%s\nmodels:\n%s", readHomeConfig(t), readHomeModels(t))
+	}
+}
+
+func TestConfigFlagDoesNotWriteHome(t *testing.T) {
+	prepare(t)
+	path := filepath.Join(t.TempDir(), "only.yaml")
+	if err := os.WriteFile(path, []byte("log-level: warn\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := startCLI(t, "", "--config", path, "version"); err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(provider.HomeConfig(home)); !os.IsNotExist(statErr) {
+		t.Fatal("home config was written")
+	}
+	if _, statErr := os.Stat(provider.HomeModels(home)); !os.IsNotExist(statErr) {
+		t.Fatal("home models were written")
+	}
+}
+
 func TestVersionWritesToStdout(t *testing.T) {
 	prepare(t)
 	stdout, stderr, err := startCLI(t, "", "version")
@@ -945,6 +1002,9 @@ func TestOllamaUsesTheRunningModel(t *testing.T) {
 	if strings.Contains(modelsText, "model:") || !strings.Contains(modelsText, server.URL) || !strings.Contains(modelsText, "auth: none") {
 		t.Fatalf("models:\n%s", modelsText)
 	}
+	if !strings.Contains(modelsText, "https://generativelanguage.googleapis.com/v1beta/openai") || !strings.Contains(modelsText, "https://openrouter.ai/api/v1") {
+		t.Fatalf("models:\n%s", modelsText)
+	}
 	if !strings.Contains(modelsText, "reasoning_effort: true") || !strings.Contains(modelsText, "reasoning_delta: true") {
 		t.Fatalf("models:\n%s", modelsText)
 	}
@@ -987,6 +1047,11 @@ clear-scrollback: true
     compat:
       reasoning_effort: false
       reasoning_delta: false
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    models:
+      - qwen/qwen3-coder
 `)
 
 	stdout, _, err := startCLI(t, "", "ollama", "--host", server.URL+"/")
@@ -1015,9 +1080,12 @@ clear-scrollback: true
 	if !strings.Contains(modelsText, server.URL) || !strings.Contains(modelsText, `"qwen3:8b"`) {
 		t.Fatalf("models:\n%s", modelsText)
 	}
+	if !strings.Contains(modelsText, "https://openrouter.ai/api/v1") || !strings.Contains(modelsText, "qwen/qwen3-coder") {
+		t.Fatalf("models:\n%s", modelsText)
+	}
 }
 
-func TestOllamaNotInstalledWritesNothing(t *testing.T) {
+func TestOllamaNotInstalledLeavesTheDefaultCatalog(t *testing.T) {
 	prepare(t)
 	look := ollamaLookPath
 	t.Cleanup(func() { ollamaLookPath = look })
@@ -1027,15 +1095,13 @@ func TestOllamaNotInstalledWritesNothing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "ollama is not installed") {
 		t.Fatalf("err = %v", err)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
+	configText := readHomeConfig(t)
+	if strings.Contains(configText, "model:") || strings.Contains(configText, "providers:") {
+		t.Fatalf("config:\n%s", configText)
 	}
-	if _, statErr := os.Stat(provider.HomeConfig(home)); !os.IsNotExist(statErr) {
-		t.Fatal("config was written")
-	}
-	if _, statErr := os.Stat(provider.HomeModels(home)); !os.IsNotExist(statErr) {
-		t.Fatal("models were written")
+	modelsText := readHomeModels(t)
+	if !strings.Contains(modelsText, "gemini:") || !strings.Contains(modelsText, "openrouter:") || strings.Contains(modelsText, "ollama:") {
+		t.Fatalf("models:\n%s", modelsText)
 	}
 }
 

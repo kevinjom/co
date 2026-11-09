@@ -20,6 +20,61 @@ func reset(t *testing.T) {
 	})
 }
 
+func TestEnsureFile(t *testing.T) {
+	reset(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".co", "config.yaml")
+	if err := EnsureFile(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureFile(path); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("dir mode %o", info.Mode().Perm())
+	}
+
+	viper.SetConfigFile(path)
+	if err := Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	if err := viper.ReadInConfig(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Level != slog.LevelInfo || got.LogRetentionDays != DefaultLogRetentionDays || got.MaxToolRounds != DefaultMaxToolRounds || got.Theme != DefaultTheme {
+		t.Fatalf("%+v", got)
+	}
+	if got.NoHistory || got.ClearScrollback || got.Resume != "" {
+		t.Fatalf("%+v", got)
+	}
+	if viper.GetString("model") != "" {
+		t.Fatalf("model %q", viper.GetString("model"))
+	}
+
+	kept := "log-level: debug\n"
+	if err := os.WriteFile(path, []byte(kept), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureFile(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != kept {
+		t.Fatalf("config changed:\n%s", data)
+	}
+}
+
 func TestLoadUsesDefaults(t *testing.T) {
 	reset(t)
 	if err := Prepare(); err != nil {

@@ -102,6 +102,12 @@ func initConfig(cmd *cobra.Command) error {
 		if err != nil {
 			return fmt.Errorf("finding home directory: %w", err)
 		}
+		if err := config.EnsureFile(provider.HomeConfig(home)); err != nil {
+			return err
+		}
+		if err := provider.EnsureModels(provider.HomeModels(home)); err != nil {
+			return err
+		}
 		if err := setDefaultConfig(home); err != nil {
 			return err
 		}

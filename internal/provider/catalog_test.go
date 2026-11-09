@@ -402,6 +402,94 @@ providers:
 	}
 }
 
+func TestEnsureModelsThenOllama(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	configPath := HomeConfig(home)
+	modelsPath := HomeModels(home)
+	if err := EnsureModels(modelsPath); err != nil {
+		t.Fatal(err)
+	}
+	first, err := os.ReadFile(modelsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureModels(modelsPath); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(modelsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("models.yaml changed:\n%s", second)
+	}
+
+	err = WriteProvider(configPath, modelsPath, ProviderSpec{
+		ID:       "ollama",
+		BaseURL:  "http://127.0.0.1:11434",
+		AuthNone: true,
+		Models:   []string{"qwen3:8b"},
+		CompatOnCreate: &llm.Compat{
+			ReasoningEffort: true,
+			ReasoningDelta:  true,
+		},
+		Model: "ollama/qwen3:8b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, err := Load(LoadOptions{Home: home, ProjectDir: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cat.Selected() != "ollama/qwen3:8b" {
+		t.Fatalf("selected %q", cat.Selected())
+	}
+	gemini, err := cat.Lookup("gemini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gemini.BaseURL != "https://generativelanguage.googleapis.com/v1beta/openai" || gemini.APIKeyEnv != "GEMINI_API_KEY" || len(gemini.Models) != 1 || gemini.Models[0] != "gemini-flash-latest" {
+		t.Fatalf("gemini %+v", gemini)
+	}
+	remote, err := cat.Lookup("openrouter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remote.BaseURL != "https://openrouter.ai/api/v1" || remote.APIKeyEnv != "OPENROUTER_API_KEY" || len(remote.Models) != 1 || remote.Models[0] != "qwen/qwen3-coder" {
+		t.Fatalf("openrouter %+v", remote)
+	}
+	ollama, err := cat.Lookup("ollama")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ollama.BaseURL != "http://127.0.0.1:11434" || !ollama.AuthNone || len(ollama.Models) != 1 || ollama.Models[0] != "qwen3:8b" {
+		t.Fatalf("ollama %+v", ollama)
+	}
+	if !ollama.Compat.ReasoningEffort || !ollama.Compat.ReasoningDelta {
+		t.Fatalf("ollama compat %+v", ollama.Compat)
+	}
+	if gemini.Compat.ReasoningEffort || remote.Compat.ReasoningEffort {
+		t.Fatal("default providers picked up ollama compat")
+	}
+
+	kept := "providers:\n  kept:\n    base_url: http://kept.example/v1\n    auth: none\n    models:\n      - a\n"
+	if err := os.WriteFile(modelsPath, []byte(kept), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureModels(modelsPath); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(modelsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != kept {
+		t.Fatalf("models.yaml changed:\n%s", data)
+	}
+}
+
 func TestWriteProviderCreatesAndRefreshes(t *testing.T) {
 	home := t.TempDir()
 	configPath := HomeConfig(home)

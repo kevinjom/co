@@ -858,6 +858,147 @@ func TestStartupEscQuits(t *testing.T) {
 	}
 }
 
+func TestStartupSlashOpensConnect(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().session = nil
+	m.mode = modeModels
+	m.startup = true
+	m.modelsLoaded = true
+	m.modelIDs = []string{"gemini/gemini-flash-latest", "openrouter/qwen/qwen3-coder"}
+	m.director = &fakeDirector{providers: []string{"gemini", "openrouter"}}
+
+	plain := ansi.Strip(m.View().Content)
+	if !strings.Contains(plain, "/ commands") || !strings.Contains(plain, "esc quit") {
+		t.Fatalf("help %q", plain)
+	}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Text: "/"})
+	got := updated.(*model)
+	if got.mode != modeChat || got.input.Value() != "/" {
+		t.Fatalf("mode %d value %q", got.mode, got.input.Value())
+	}
+	plain = ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "> /models") || !strings.Contains(plain, "/connect") || !strings.Contains(plain, "esc back") {
+		t.Fatalf("commands %q", plain)
+	}
+
+	updated, _ = got.Update(press(tea.KeyDown, 0))
+	updated, _ = updated.Update(press(tea.KeyEnter, 0))
+	got = updated.(*model)
+	if got.mode != modeProviders {
+		t.Fatalf("mode %d", got.mode)
+	}
+	plain = ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "gemini") || !strings.Contains(plain, "esc back") {
+		t.Fatalf("providers %q", plain)
+	}
+
+	updated, cmd := got.Update(press(tea.KeyEsc, 0))
+	got = updated.(*model)
+	if got.quitting || got.mode != modeModels || cmd != nil {
+		t.Fatalf("quitting %v mode %d cmd %v", got.quitting, got.mode, cmd != nil)
+	}
+	plain = ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "gemini/gemini-flash-latest") {
+		t.Fatalf("models %q", plain)
+	}
+}
+
+func TestStartupConnectReturnsToModels(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().session = nil
+	m.mode = modeModels
+	m.startup = true
+	m.modelsLoaded = true
+	m.modelIDs = []string{"gemini/gemini-flash-latest"}
+	m.director = &fakeDirector{providers: []string{"gemini"}}
+	m.filter = "/connect gemini"
+
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if cmd != nil || got.mode != modeConnect || got.connectID != "gemini" {
+		t.Fatalf("mode %d id %q cmd %v", got.mode, got.connectID, cmd != nil)
+	}
+
+	updated, cmd = got.Update(press(tea.KeyEsc, 0))
+	got = updated.(*model)
+	if got.quitting || got.mode != modeModels || got.secret != "" || cmd != nil {
+		t.Fatalf("quitting %v mode %d secret %q cmd %v", got.quitting, got.mode, got.secret, cmd != nil)
+	}
+
+	got.filter = "/connect gemini"
+	updated, cmd = got.Update(press(tea.KeyEnter, 0))
+	got = updated.(*model)
+	if got.mode != modeConnect || cmd != nil {
+		t.Fatalf("mode %d cmd %v", got.mode, cmd != nil)
+	}
+	updated, _ = got.Update(tea.KeyPressMsg{Text: "sk-test"})
+	updated, cmd = updated.Update(press(tea.KeyEnter, 0))
+	got = updated.(*model)
+	if cmd == nil {
+		t.Fatal("expected connect")
+	}
+	updated, cmd = got.Update(cmd().(connectDoneMsg))
+	got = updated.(*model)
+	if got.quitting || got.mode != modeModels || cmd != nil {
+		t.Fatalf("quitting %v mode %d cmd %v", got.quitting, got.mode, cmd != nil)
+	}
+	plain := ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "saved key for gemini") || !strings.Contains(plain, "gemini/gemini-flash-latest") {
+		t.Fatalf("view %q", plain)
+	}
+	if strings.Contains(plain, "sk-test") {
+		t.Fatal("saved key is visible")
+	}
+}
+
+func TestStartupUnknownCommandStaysInThePicker(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().session = nil
+	m.mode = modeModels
+	m.modelsLoaded = true
+	m.modelIDs = []string{"gemini/gemini-flash-latest"}
+	m.filter = "/nope"
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if got.quitting || got.mode != modeModels || cmd != nil {
+		t.Fatalf("quitting %v mode %d cmd %v", got.quitting, got.mode, cmd != nil)
+	}
+	plain := ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "unknown command") || strings.Contains(plain, "> gemini/gemini-flash-latest") {
+		t.Fatalf("view %q", plain)
+	}
+}
+
+func TestSlashFiltersModelsWhenASessionExists(t *testing.T) {
+	m := newTestModel(t)
+	m.mode = modeModels
+	m.modelsLoaded = true
+	m.modelIDs = []string{"gemini/gemini-flash-latest"}
+	updated, _ := m.Update(tea.KeyPressMsg{Text: "/"})
+	got := updated.(*model)
+	if got.mode != modeModels || got.filter != "/" || got.input.Value() != "" {
+		t.Fatalf("mode %d filter %q input %q", got.mode, got.filter, got.input.Value())
+	}
+}
+
+func TestModelsLoadLeavesConnectAlone(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().session = nil
+	m.mode = modeConnect
+	m.connectID = "gemini"
+	m.secret = "sk"
+	m.pickerErr = "api key is empty"
+	updated, cmd := m.Update(modelsLoadedMsg{ids: []string{"gemini/gemini-flash-latest"}})
+	got := updated.(*model)
+	if cmd != nil || got.mode != modeConnect || got.secret != "sk" || got.pickerErr != "api key is empty" {
+		t.Fatalf("mode %d secret %q err %q cmd %v", got.mode, got.secret, got.pickerErr, cmd != nil)
+	}
+	if !got.modelsLoaded || len(got.modelIDs) != 1 {
+		t.Fatalf("loaded %v ids %v", got.modelsLoaded, got.modelIDs)
+	}
+}
+
 func TestPasteFillsConnectKey(t *testing.T) {
 	m := newTestModel(t)
 	m.director = &fakeDirector{session: m.tab().session, ready: true}

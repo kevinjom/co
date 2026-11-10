@@ -399,6 +399,11 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.dismissFiles() {
 			return m, nil
 		}
+		if m.session() == nil {
+			m.input.Reset()
+			m.stopComplete()
+			return m, m.returnToModels()
+		}
 		m.recallQueue()
 		return m, nil
 	case "pgup":
@@ -1235,7 +1240,8 @@ func waitPipe(p *turnPipe) tea.Cmd {
 }
 
 // Run starts the interactive UI on the alternate screen.
-// When no model is selected yet, the model picker is open and esc quits.
+// When no model is selected yet, the model picker is open.
+// "/" lists commands, so /connect can run before a model is chosen, and esc quits.
 func Run(ctx context.Context, app Director, cwd string, clearScrollback bool, themeName string) error {
 	modelName := ""
 	var session *agent.Session

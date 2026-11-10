@@ -136,7 +136,7 @@ co --resume 20261102T120000Z-ab12 --no-history
 co session list
 ```
 
-With no model selected, a terminal opens the model picker. Anything else exits and asks for `--model` or `model` in `~/.co/config.yaml`.
+With no model selected, a terminal opens the model picker. `/` lists commands there, so `/connect` can save a key before a model is chosen. Esc from that picker quits. Anything else exits and asks for `--model` or `model` in `~/.co/config.yaml`.
 
 | Flag | Environment | `config.yaml` | |
 | --- | --- | --- | --- |

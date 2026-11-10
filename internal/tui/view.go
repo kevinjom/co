@@ -160,19 +160,29 @@ func (m *model) helpLine() string {
 	case m.tab().busy:
 		text = "enter queue  ·  ctrl+j newline  ·  ctrl+c stop"
 	case m.mode == modeSkills && m.session() == nil:
-		text = "enter insert  ·  esc quit  ·  up/down move"
+		text = "enter insert  ·  esc back  ·  up/down move"
 	case m.mode == modeSkills:
 		text = "enter insert  ·  esc close  ·  up/down move"
-	case (m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions || m.mode == modeThemes) && m.session() == nil:
-		text = "enter select  ·  esc quit  ·  up/down move"
+	case m.mode == modeModels && m.session() == nil:
+		text = "enter select  ·  / commands  ·  esc quit  ·  up/down move"
+	case m.mode == modeProviders && m.session() == nil,
+		m.mode == modeSessions && m.session() == nil,
+		m.mode == modeThemes && m.session() == nil:
+		text = "enter select  ·  esc back  ·  up/down move"
 	case m.mode == modeModels || m.mode == modeProviders || m.mode == modeSessions || m.mode == modeThemes:
 		text = "enter select  ·  esc close  ·  up/down move"
+	case m.mode == modeConnect && m.session() == nil:
+		text = "enter save  ·  esc back"
 	case m.mode == modeConnect:
 		text = "enter save  ·  esc cancel"
 	case m.insertSkillArmed():
 		text = "up/down move  ·  tab insert  ·  enter insert"
+	case m.commandOverlay() != "" && m.session() == nil:
+		text = "up/down move  ·  tab complete  ·  enter select  ·  esc back"
 	case m.commandOverlay() != "":
 		text = "up/down move  ·  tab complete  ·  enter select"
+	case m.mode == modeChat && m.session() == nil:
+		text = "esc models  ·  ctrl+c quit"
 	}
 	width := m.usableWidth()
 	if width > 0 && lipgloss.Width(text) > width {

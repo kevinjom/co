@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/kevinjom/co/internal/command"
 	palette "github.com/kevinjom/co/internal/theme"
 )
 
@@ -43,6 +44,66 @@ func (m *model) openPicker() tea.Cmd {
 	return m.fetchModels()
 }
 
+// returnToModels shows the model list again.
+// The picker is the only screen until a session exists, so leaving /connect
+// comes back here instead of an empty composer.
+func (m *model) returnToModels() tea.Cmd {
+	if !m.modelsLoaded {
+		return m.openPicker()
+	}
+	m.mode = modeModels
+	m.filter = ""
+	m.cursor = 0
+	m.pickerErr = ""
+	m.layout()
+	m.paint()
+	return nil
+}
+
+// beginSlash opens the composer on "/" so command completion can run.
+// Until a session exists the model picker owns every key, which blocks /connect.
+func (m *model) beginSlash() (tea.Model, tea.Cmd) {
+	m.mode = modeChat
+	m.filter = ""
+	m.pickerErr = ""
+	m.completeIndex = 0
+	setCaret(&m.input, "/", 1)
+	m.layout()
+	m.paint()
+	return m, m.input.Focus()
+}
+
+// takeFilterCommand runs a slash command typed into the model picker.
+// A pasted "/connect gemini" would otherwise be a filter with no matches.
+func (m *model) takeFilterCommand() (bool, tea.Cmd) {
+	if m.mode != modeModels || m.session() != nil {
+		return false, nil
+	}
+	text := strings.TrimSpace(m.filter)
+	if !strings.HasPrefix(text, "/") {
+		return false, nil
+	}
+	parsed := command.Parse(text, m.skillNames())
+	switch parsed.Kind {
+	case command.KindChat:
+		return false, nil
+	case command.KindError:
+		m.pickerErr = parsed.Err.Error()
+		m.layout()
+		m.paint()
+		return true, nil
+	case command.KindQuit, command.KindModels, command.KindConnect, command.KindNew,
+		command.KindSessions, command.KindTheme, command.KindSkill:
+		m.filter = ""
+		m.pickerErr = ""
+		m.mode = modeChat
+		m.input.SetValue(text)
+		return true, m.submit()
+	default:
+		panic(fmt.Sprintf("unhandled command kind %d", parsed.Kind))
+	}
+}
+
 func (m *model) fetchModels() tea.Cmd {
 	if m.director == nil {
 		return func() tea.Msg {
@@ -63,6 +124,10 @@ func (m *model) fetchModels() tea.Cmd {
 func (m *model) onModels(msg modelsLoadedMsg) (tea.Model, tea.Cmd) {
 	m.modelIDs = msg.ids
 	m.modelsLoaded = true
+	// /connect can open before this list arrives. Keep that screen as it is.
+	if m.mode != modeModels {
+		return m, nil
+	}
 	m.cursor = 0
 	m.pickerErr = ""
 	if msg.err != nil {
@@ -149,13 +214,16 @@ func (m *model) useTheme(name string) tea.Cmd {
 	if m.director != nil {
 		saveErr = m.director.SaveTheme(m.theme.name)
 	}
-	m.mode = modeChat
 	m.filter = ""
 	m.pickerErr = ""
 	m.addBlock(block{kind: blockNote, text: "theme " + m.theme.name})
 	if saveErr != nil {
 		m.addBlock(block{kind: blockError, text: saveErr.Error()})
 	}
+	if m.session() == nil {
+		return m.returnToModels()
+	}
+	m.mode = modeChat
 	m.layout()
 	m.paint()
 	return m.input.Focus()
@@ -228,7 +296,12 @@ func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.quit()
 	case "esc":
 		if m.session() == nil {
-			return m.quit()
+			if m.mode == modeModels {
+				return m.quit()
+			}
+			m.filter = ""
+			m.pickerErr = ""
+			return m, m.returnToModels()
 		}
 		m.mode = modeChat
 		m.filter = ""
@@ -237,6 +310,9 @@ func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.paint()
 		return m, m.input.Focus()
 	case "enter", "ctrl+m":
+		if handled, cmd := m.takeFilterCommand(); handled {
+			return m, cmd
+		}
 		if m.mode == modeSessions {
 			return m.chooseSession()
 		}
@@ -296,6 +372,9 @@ func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	if m.mode == modeModels && m.session() == nil && m.filter == "" && text == "/" {
+		return m.beginSlash()
+	}
 	m.filter += text
 	m.cursor = 0
 	m.pickerErr = ""
@@ -312,6 +391,9 @@ func (m *model) onConnectKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.secret = ""
 		m.pickerErr = ""
+		if m.session() == nil {
+			return m, m.returnToModels()
+		}
 		m.mode = modeChat
 		m.layout()
 		m.paint()
@@ -410,9 +492,12 @@ func (m *model) onConnected(msg connectDoneMsg) (tea.Model, tea.Cmd) {
 		m.paint()
 		return m, nil
 	}
-	m.mode = modeChat
 	m.pickerErr = ""
 	m.addBlock(block{kind: blockNote, text: "saved key for " + m.connectID})
+	if m.session() == nil {
+		return m, m.returnToModels()
+	}
+	m.mode = modeChat
 	m.layout()
 	m.paint()
 	return m, m.input.Focus()

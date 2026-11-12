@@ -173,6 +173,7 @@ func (a *App) Resume(ctx context.Context, id, model string) error {
 	}
 	session := a.newSession(client, wire, recorder)
 	session.Restore(loaded.Messages)
+	session.BindSkills(restoredSkills(loaded.MessageSkills))
 	session.SetTitle(loaded.Title)
 	a.running = append(a.running, running{session: session, history: history})
 	a.model = ref
@@ -264,6 +265,24 @@ func (a *App) newSession(client llm.Chatter, wire string, recorder agent.Recorde
 		session.EnableLSP(a.lang)
 	}
 	return session
+}
+
+func restoredSkills(saved [][]transcript.SavedSkill) [][]skill.Skill {
+	groups := make([][]skill.Skill, len(saved))
+	for i, list := range saved {
+		if len(list) == 0 {
+			continue
+		}
+		groups[i] = make([]skill.Skill, len(list))
+		for j, sk := range list {
+			groups[i][j] = skill.Skill{
+				Name: sk.Name,
+				Dir:  sk.Dir,
+				Body: sk.Body,
+			}
+		}
+	}
+	return groups
 }
 
 // Skills returns the skills found at startup, in name order.

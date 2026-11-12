@@ -21,15 +21,16 @@ const version = 1
 // Writer appends a session header and completed messages.
 // The file is created on the first Record, so an unused writer leaves nothing behind.
 type Writer struct {
-	path    string
-	id      string
-	cwd     string
-	model   string
-	started time.Time
-	file    *os.File
-	seq     int
-	closed  bool
-	mu      sync.Mutex
+	path        string
+	id          string
+	cwd         string
+	model       string
+	started     time.Time
+	file        *os.File
+	seq         int
+	lastMessage int
+	closed      bool
+	mu          sync.Mutex
 }
 
 type sessionHeader struct {
@@ -71,7 +72,10 @@ type skillRecord struct {
 	V    int    `json:"v"`
 	Seq  int    `json:"seq"`
 	TS   string `json:"ts"`
+	At   int    `json:"at,omitempty"`
 	Name string `json:"name"`
+	Dir  string `json:"dir,omitempty"`
+	Body string `json:"body,omitempty"`
 }
 
 // Open prepares a session file under home/.co/projects/<project>/sessions.
@@ -158,7 +162,7 @@ func newSessionID(now time.Time) (string, error) {
 func (w *Writer) Record(msg llm.Message, interrupted bool) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.writeRecord(func(seq int) any {
+	if err := w.writeRecord(func(seq int) any {
 		return messageRecord{
 			Type:        "message",
 			V:           version,
@@ -167,7 +171,11 @@ func (w *Writer) Record(msg llm.Message, interrupted bool) error {
 			Interrupted: interrupted,
 			Message:     msg,
 		}
-	})
+	}); err != nil {
+		return err
+	}
+	w.lastMessage = w.seq
+	return nil
 }
 
 // RecordModel appends one model-change line.
@@ -188,6 +196,7 @@ func (w *Writer) RecordModel(model string) error {
 
 // RecordSkill appends the name of a skill activated in this session.
 // The file is created on this write when nothing has been stored yet.
+// A name-only record is not attached to a message.
 func (w *Writer) RecordSkill(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -202,6 +211,36 @@ func (w *Writer) RecordSkill(name string) error {
 			Seq:  seq,
 			TS:   time.Now().UTC().Format(time.RFC3339Nano),
 			Name: name,
+		}
+	})
+}
+
+// RecordSkillUse appends the skill named by the message most recently recorded.
+// dir may be empty. body is the SKILL.md text from that turn.
+func (w *Writer) RecordSkillUse(name, dir, body string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("session history: skill name is empty")
+	}
+	if strings.TrimSpace(body) == "" {
+		return fmt.Errorf("session history: skill body is empty")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.lastMessage == 0 {
+		return fmt.Errorf("session history: skill is not attached to a message")
+	}
+	at := w.lastMessage
+	return w.writeRecord(func(seq int) any {
+		return skillRecord{
+			Type: "skill",
+			V:    version,
+			Seq:  seq,
+			TS:   time.Now().UTC().Format(time.RFC3339Nano),
+			At:   at,
+			Name: name,
+			Dir:  dir,
+			Body: body,
 		}
 	})
 }

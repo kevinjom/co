@@ -16,23 +16,18 @@ func (s *Session) SetCatalog(catalog *skill.Catalog) {
 	s.refreshPrompt()
 }
 
-// applyTurnSkills adds the skills named in lines to the system prompt.
-// The names last only until clearTurnSkills.
-func (s *Session) applyTurnSkills(lines []string) {
-	if s == nil {
-		return
+// skillsOn returns the skills named in one user line, in first-seen order.
+func (s *Session) skillsOn(line string) []skill.Skill {
+	names := skillsNamed([]string{line}, s.catalog)
+	out := make([]skill.Skill, 0, len(names))
+	for _, name := range names {
+		sk, ok := s.catalog.Get(name)
+		if !ok {
+			continue
+		}
+		out = append(out, sk)
 	}
-	s.active = skillsNamed(lines, s.catalog)
-	s.refreshPrompt()
-}
-
-// clearTurnSkills drops the skills applied for the turn that just finished.
-func (s *Session) clearTurnSkills() {
-	if s == nil || len(s.active) == 0 {
-		return
-	}
-	s.active = []string{}
-	s.refreshPrompt()
+	return out
 }
 
 func (s *Session) refreshPrompt() {
@@ -43,23 +38,7 @@ func (s *Session) refreshPrompt() {
 	if s.catalog != nil {
 		listed = s.catalog.List()
 	}
-	active := make([]skill.Skill, 0, len(s.active))
-	for _, name := range s.active {
-		if s.catalog == nil {
-			continue
-		}
-		sk, ok := s.catalog.Get(name)
-		if !ok {
-			continue
-		}
-		active = append(active, sk)
-	}
-	s.messages[0].Content = systemPrompt(
-		s.cwd,
-		s.lsp,
-		listed,
-		active,
-	)
+	s.messages[0].Content = systemPrompt(s.cwd, s.lsp, listed)
 }
 
 // skillsNamed returns each skill mentioned as /name, in first-seen order.

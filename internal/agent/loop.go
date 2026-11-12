@@ -16,8 +16,10 @@ import (
 )
 
 // Recorder stores completed messages. A nil recorder leaves history off.
+// RecordSkillUse stores a skill named by the message most recently recorded.
 type Recorder interface {
 	Record(msg llm.Message, interrupted bool) error
+	RecordSkillUse(name, dir, body string) error
 }
 
 // Session is one in-memory conversation.
@@ -31,7 +33,7 @@ type Session struct {
 	recorder      Recorder
 	maxToolRounds int
 	catalog       *skill.Catalog
-	active        []string
+	attached      [][]skill.Skill
 	lsp           bool
 	titleWG       sync.WaitGroup
 	titleMu       sync.Mutex
@@ -51,14 +53,13 @@ func NewSession(client llm.Chatter, model, cwd string, recorder Recorder) *Sessi
 		defs:          toolDefinitions(set),
 		recorder:      recorder,
 		maxToolRounds: config.DefaultMaxToolRounds,
-		active:        []string{},
+		attached:      [][]skill.Skill{nil},
 		messages: []llm.Message{
 			{
 				Role: "system",
 				Content: systemPrompt(
 					cwd,
 					false,
-					nil,
 					nil,
 				),
 			},
@@ -108,6 +109,20 @@ func (s *Session) DropRecorder() {
 // Those messages are not written again.
 func (s *Session) Restore(messages []llm.Message) {
 	s.messages = append(s.messages, messages...)
+	for range messages {
+		s.attached = append(s.attached, nil)
+	}
+}
+
+// BindSkills attaches skills to messages restored onto a fresh session.
+// skills[i] belongs to restored message i. The stored message text is unchanged.
+func (s *Session) BindSkills(skills [][]skill.Skill) {
+	if s == nil || len(skills) == 0 || len(s.attached) != len(skills)+1 {
+		return
+	}
+	for i, group := range skills {
+		s.attached[i+1] = group
+	}
 }
 
 // Messages returns a copy of the conversation, including the system prompt.
@@ -131,11 +146,9 @@ func (s *Session) Reply(ctx context.Context, lines []string, observe Observer) (
 	if len(lines) == 0 {
 		return "", nil
 	}
-	s.applyTurnSkills(lines)
-	defer s.clearTurnSkills()
 	first := !hasUserMessage(s.messages)
 	for _, line := range lines {
-		s.remember(llm.Message{Role: "user", Content: line}, false)
+		s.keep(llm.Message{Role: "user", Content: line}, false, s.skillsOn(line))
 	}
 	if first {
 		s.storeFallbackTitle(lines[0])
@@ -167,7 +180,7 @@ func (s *Session) converse(ctx context.Context, observe Observer) (string, error
 
 func (s *Session) complete(ctx context.Context, defs []llm.Tool, observe Observer) (llm.Message, error) {
 	var reasoning strings.Builder
-	msg, err := s.client.ChatStream(ctx, s.model, s.messages, defs, func(kind llm.StreamKind, text string) {
+	msg, err := s.client.ChatStream(ctx, s.model, s.wireMessages(), defs, func(kind llm.StreamKind, text string) {
 		switch kind {
 		case llm.StreamContent:
 			emit(observe, AnswerDelta{Text: text})
@@ -208,14 +221,43 @@ func (s *Session) keepPartial(msg llm.Message, err error) (string, error) {
 // remember keeps a finished message in the session and, when history is on, in the transcript.
 // A write failure disables history for the rest of the process. The turn itself still succeeds.
 func (s *Session) remember(msg llm.Message, interrupted bool) {
+	s.keep(msg, interrupted, nil)
+}
+
+// keep stores msg and any skills that line named.
+// The skill text is not part of msg. wireMessages appends it when calling the model.
+func (s *Session) keep(msg llm.Message, interrupted bool, skills []skill.Skill) {
 	s.messages = append(s.messages, msg)
+	s.attached = append(s.attached, skills)
 	if s.recorder == nil {
 		return
 	}
 	if err := s.recorder.Record(msg, interrupted); err != nil {
 		slog.Warn("session history disabled", "err", err)
 		s.recorder = nil
+		return
 	}
+	for _, sk := range skills {
+		if err := s.recorder.RecordSkillUse(sk.Name, sk.Dir, sk.Body); err != nil {
+			slog.Warn("session history disabled", "err", err)
+			s.recorder = nil
+			return
+		}
+	}
+}
+
+// wireMessages is the chat request. A stored user line that named a skill
+// is copied with that skill's text appended, so later turns send the same bytes.
+func (s *Session) wireMessages() []llm.Message {
+	out := make([]llm.Message, len(s.messages))
+	copy(out, s.messages)
+	for i := range out {
+		if i >= len(s.attached) {
+			break
+		}
+		out[i].Content = withSkills(out[i].Content, s.attached[i])
+	}
+	return out
 }
 
 func (s *Session) runTools(ctx context.Context, calls []llm.ToolCall, observe Observer) {

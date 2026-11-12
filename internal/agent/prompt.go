@@ -7,7 +7,7 @@ import (
 	"github.com/kevinjom/co/internal/skill"
 )
 
-func systemPrompt(cwd string, lsp bool, listed, active []skill.Skill) string {
+func systemPrompt(cwd string, lsp bool, listed []skill.Skill) string {
 	lines := []string{
 		"You are co, a coding assistant.",
 		"The working directory is " + cwd + ".",
@@ -44,10 +44,20 @@ func systemPrompt(cwd string, lsp bool, listed, active []skill.Skill) string {
 		}
 		lines = append(lines, "When a message names a skill as /name, follow that skill for that turn only.")
 	}
-	for _, sk := range active {
-		lines = append(lines, "", skillBlock(sk))
-	}
 	return strings.Join(lines, "\n")
+}
+
+// withSkills appends each skill block to the typed line the model should see.
+// The stored message keeps the typed line alone.
+func withSkills(content string, skills []skill.Skill) string {
+	if len(skills) == 0 {
+		return content
+	}
+	blocks := make([]string, 0, len(skills))
+	for _, sk := range skills {
+		blocks = append(blocks, skillBlock(sk))
+	}
+	return content + "\n\n" + strings.Join(blocks, "\n\n")
 }
 
 func skillBlock(sk skill.Skill) string {

@@ -498,6 +498,110 @@ func TestResumeRejectsADifferentDirectory(t *testing.T) {
 	}
 }
 
+func TestResumeAttachesSkillToItsMessage(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	w, err := Open(home, dir, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const typed = "/grilling fix the parser"
+	const body = "---\nname: grilling\ndescription: Grill a plan.\n---\nAsk one question.\n"
+	if err := w.Record(llm.Message{Role: "user", Content: typed}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.RecordSkillUse("grilling", ".agents/skills/grilling", body); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(llm.Message{Role: "assistant", Content: "What should the parser accept?"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Resume(home, dir, w.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = loaded.Writer.Close() })
+	if len(loaded.Messages) != 2 || loaded.Messages[0].Content != typed {
+		t.Fatalf("messages %+v", loaded.Messages)
+	}
+	if len(loaded.Skills) != 0 {
+		t.Fatalf("names %v", loaded.Skills)
+	}
+	if len(loaded.MessageSkills) != 2 || len(loaded.MessageSkills[1]) != 0 {
+		t.Fatalf("skills %#v", loaded.MessageSkills)
+	}
+	got := loaded.MessageSkills[0]
+	if len(got) != 1 || got[0].Name != "grilling" || got[0].Dir != ".agents/skills/grilling" || got[0].Body != body {
+		t.Fatalf("skill %+v", got)
+	}
+
+	lines := readLines(t, w.path)
+	var skillLine struct {
+		At   int    `json:"at"`
+		Name string `json:"name"`
+		Dir  string `json:"dir"`
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(lines[2]), &skillLine); err != nil {
+		t.Fatal(err)
+	}
+	if skillLine.At != 1 || skillLine.Name != "grilling" || skillLine.Body != body {
+		t.Fatalf("record %+v", skillLine)
+	}
+	if skillLine.Dir != ".agents/skills/grilling" {
+		t.Fatalf("dir %q", skillLine.Dir)
+	}
+}
+
+func TestRecordSkillUseNeedsAMessage(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	w, err := Open(home, dir, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	err = w.RecordSkillUse("grilling", "", "Ask one question.\n")
+	if err == nil || !strings.Contains(err.Error(), "not attached") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResumeRejectsASkillWithoutItsMessage(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	w, err := Open(home, dir, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(llm.Message{Role: "user", Content: "hi"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	extra := []byte(strings.Join([]string{
+		`{"type":"skill","v":1,"seq":2,"ts":"2026-11-12T00:00:00Z",`,
+		`"at":9,"name":"grilling","body":"Ask.\n"}`,
+	}, "") + "\n")
+	raw, err := os.ReadFile(w.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(w.path, append(raw, extra...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Resume(home, dir, w.ID())
+	var input *InputError
+	if !errors.As(err, &input) || !strings.Contains(err.Error(), "not attached") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestResumeKeepsSkillNames(t *testing.T) {
 	home := t.TempDir()
 	dir := t.TempDir()

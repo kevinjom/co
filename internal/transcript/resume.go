@@ -29,15 +29,26 @@ func inputf(format string, args ...any) error {
 	return &InputError{msg: fmt.Sprintf(format, args...)}
 }
 
+// SavedSkill is a skill named by one stored user message.
+// Body is the SKILL.md text from the turn that named it.
+type SavedSkill struct {
+	Name string
+	Dir  string
+	Body string
+}
+
 // Loaded is an existing session opened for appending.
 // Model is the latest model, after any model-change records.
 // Messages are the completed turns, without the system prompt.
+// Skills are names from older skill records that are not tied to a message.
+// MessageSkills is parallel to Messages. A message that named no skill has an empty slice.
 type Loaded struct {
-	Writer   *Writer
-	Model    string
-	Title    string
-	Messages []llm.Message
-	Skills   []string
+	Writer        *Writer
+	Model         string
+	Title         string
+	Messages      []llm.Message
+	Skills        []string
+	MessageSkills [][]SavedSkill
 }
 
 // Resume opens home/.co/projects/<project>/sessions/<id>.jsonl for appending.
@@ -114,21 +125,24 @@ func Resume(home, cwd, id string) (*Loaded, error) {
 			file:  file,
 			seq:   parsed.seq,
 		},
-		Model:    parsed.model,
-		Title:    title,
-		Messages: parsed.messages,
-		Skills:   parsed.skills,
+		Model:         parsed.model,
+		Title:         title,
+		Messages:      parsed.messages,
+		Skills:        parsed.skills,
+		MessageSkills: parsed.messageSkills,
 	}, nil
 }
 
 type parsedSession struct {
-	headerModel string
-	model       string
-	title       string
-	messages    []llm.Message
-	skills      []string
-	seq         int
-	kept        int
+	headerModel   string
+	model         string
+	title         string
+	messages      []llm.Message
+	skills        []string
+	messageSkills [][]SavedSkill
+	msgIndex      map[int]int
+	seq           int
+	kept          int
 }
 
 func parseSession(id, cwd string, raw []byte) (parsedSession, error) {
@@ -160,11 +174,13 @@ func parseSession(id, cwd string, raw []byte) (parsedSession, error) {
 	}
 
 	parsed := parsedSession{
-		headerModel: header.Model,
-		model:       header.Model,
-		messages:    []llm.Message{},
-		skills:      []string{},
-		kept:        len(kept),
+		headerModel:   header.Model,
+		model:         header.Model,
+		messages:      []llm.Message{},
+		skills:        []string{},
+		messageSkills: [][]SavedSkill{},
+		msgIndex:      map[int]int{},
+		kept:          len(kept),
 	}
 	for i, line := range lines[1:] {
 		next, err := applyRecord(line, &parsed)
@@ -202,7 +218,9 @@ func applyRecord(line []byte, parsed *parsedSession) (parsedSession, error) {
 		if strings.TrimSpace(rec.Message.Role) == "" {
 			return parsedSession{}, fmt.Errorf("message has no role")
 		}
+		next.msgIndex[kind.Seq] = len(next.messages)
 		next.messages = append(next.messages, rec.Message)
+		next.messageSkills = append(next.messageSkills, []SavedSkill{})
 		return next, nil
 	case "model":
 		var rec modelRecord
@@ -232,7 +250,25 @@ func applyRecord(line []byte, parsed *parsedSession) (parsedSession, error) {
 		if strings.TrimSpace(rec.Name) == "" {
 			return parsedSession{}, fmt.Errorf("skill name is empty")
 		}
-		next.skills = append(next.skills, rec.Name)
+		if rec.At == 0 {
+			if rec.Body != "" || rec.Dir != "" {
+				return parsedSession{}, fmt.Errorf("skill %q is not attached to a message", rec.Name)
+			}
+			next.skills = append(next.skills, rec.Name)
+			return next, nil
+		}
+		idx, ok := next.msgIndex[rec.At]
+		if !ok {
+			return parsedSession{}, fmt.Errorf("skill %q is not attached to a message", rec.Name)
+		}
+		if strings.TrimSpace(rec.Body) == "" {
+			return parsedSession{}, fmt.Errorf("skill body is empty")
+		}
+		next.messageSkills[idx] = append(next.messageSkills[idx], SavedSkill{
+			Name: rec.Name,
+			Dir:  rec.Dir,
+			Body: rec.Body,
+		})
 		return next, nil
 	default:
 		return parsedSession{}, fmt.Errorf("unknown record %q", kind.Type)

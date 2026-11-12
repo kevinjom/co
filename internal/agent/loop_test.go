@@ -326,6 +326,7 @@ func TestTurnReportsToolFailure(t *testing.T) {
 type memRecorder struct {
 	msgs        []llm.Message
 	interrupted []bool
+	skills      []string
 	fail        error
 	calls       int
 }
@@ -337,6 +338,14 @@ func (m *memRecorder) Record(msg llm.Message, interrupted bool) error {
 	}
 	m.msgs = append(m.msgs, msg)
 	m.interrupted = append(m.interrupted, interrupted)
+	return nil
+}
+
+func (m *memRecorder) RecordSkillUse(name, dir, body string) error {
+	if m.fail != nil {
+		return m.fail
+	}
+	m.skills = append(m.skills, strings.Join([]string{name, dir, body}, "\n"))
 	return nil
 }
 

@@ -1391,6 +1391,39 @@ func TestEnterWhileBusyQueuesTheLine(t *testing.T) {
 	}
 }
 
+func TestFinishedTurnNotesHowLongItCooked(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().turnID = 1
+	m.tab().busy = true
+	updated, _ := m.Update(turnDoneMsg{tabID: 1, id: 1, answer: "done", elapsed: 1500 * time.Millisecond})
+	got := updated.(*model)
+	plain := ansi.Strip(got.renderTranscript())
+	done := strings.Index(plain, "done")
+	cooked := strings.Index(plain, "cooked for 1.5s")
+	if done < 0 || cooked < 0 || done > cooked {
+		t.Fatalf("transcript %q", plain)
+	}
+}
+
+func TestCookedFor(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{d: 400 * time.Microsecond, want: "cooked for 1ms"},
+		{d: 840 * time.Millisecond, want: "cooked for 840ms"},
+		{d: time.Second, want: "cooked for 1s"},
+		{d: 1500 * time.Millisecond, want: "cooked for 1.5s"},
+		{d: 90 * time.Second, want: "cooked for 1m30s"},
+		{d: 2 * time.Minute, want: "cooked for 2m"},
+	}
+	for _, tc := range cases {
+		if got := cookedFor(tc.d); got != tc.want {
+			t.Fatalf("cookedFor(%s) = %q, want %q", tc.d, got, tc.want)
+		}
+	}
+}
+
 func TestFinishedTurnSendsTheQueue(t *testing.T) {
 	m := newTestModel(t)
 	m.tab().turnID = 1

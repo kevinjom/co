@@ -4,11 +4,36 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
+
+// cookedFor is the note under a finished turn. Sub-second turns stay in
+// milliseconds, longer ones round to a tenth of a second, then whole seconds.
+func cookedFor(d time.Duration) string {
+	if d < time.Millisecond {
+		d = time.Millisecond
+	}
+	switch {
+	case d < time.Second:
+		return fmt.Sprintf("cooked for %dms", d.Round(time.Millisecond).Milliseconds())
+	case d < time.Minute:
+		rounded := d.Round(100 * time.Millisecond)
+		if rounded%time.Second == 0 {
+			return fmt.Sprintf("cooked for %ds", rounded/time.Second)
+		}
+		return fmt.Sprintf("cooked for %.1fs", rounded.Seconds())
+	default:
+		rounded := d.Round(time.Second)
+		if rounded%time.Minute == 0 {
+			return fmt.Sprintf("cooked for %dm", rounded/time.Minute)
+		}
+		return "cooked for " + rounded.String()
+	}
+}
 
 func styleInput(ta *textarea.Model, th theme) {
 	styles := textarea.DefaultStyles(th.dark)

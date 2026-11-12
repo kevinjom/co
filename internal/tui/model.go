@@ -57,10 +57,11 @@ type eventMsg struct {
 type paintMsg struct{}
 
 type turnDoneMsg struct {
-	tabID  int
-	id     int
-	answer string
-	err    error
+	tabID   int
+	id      int
+	answer  string
+	err     error
+	elapsed time.Duration
 }
 
 type openedMsg struct {
@@ -680,10 +681,17 @@ func (m *model) startTurn(item *tab, lines []string) tea.Cmd {
 	item.pipe = pipe
 	session := item.session
 	go func() {
+		started := time.Now()
 		answer, err := session.Reply(ctx, sent, func(ev agent.Event) {
 			pipe.push(eventMsg{tabID: tabID, id: turn, event: ev})
 		})
-		pipe.push(turnDoneMsg{tabID: tabID, id: turn, answer: answer, err: err})
+		pipe.push(turnDoneMsg{
+			tabID:   tabID,
+			id:      turn,
+			answer:  answer,
+			err:     err,
+			elapsed: time.Since(started),
+		})
 	}()
 	if spinning {
 		return waitPipe(pipe)
@@ -792,6 +800,9 @@ func (m *model) finishTurn(msg turnDoneMsg) (tea.Model, tea.Cmd) {
 	default:
 		item.state = statusError
 		item.blocks = append(item.blocks, block{kind: blockError, text: msg.err.Error()})
+	}
+	if msg.elapsed > 0 {
+		item.blocks = append(item.blocks, block{kind: blockNote, text: cookedFor(msg.elapsed)})
 	}
 	item.answered = false
 	cmd := m.drainQueue(item)

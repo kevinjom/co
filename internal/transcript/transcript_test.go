@@ -632,6 +632,49 @@ func TestResumeKeepsSkillNames(t *testing.T) {
 	}
 }
 
+func TestResumeRestoresUsage(t *testing.T) {
+	home := t.TempDir()
+	dir := t.TempDir()
+	w, err := Open(home, dir, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(llm.Message{Role: "user", Content: "hi"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Record(llm.Message{
+		Role:    "assistant",
+		Content: "hello",
+		Usage:   &llm.Usage{Input: 12, Output: 3},
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := readLines(t, w.path)
+	if strings.Contains(lines[1], `"usage"`) {
+		t.Fatalf("user line stored usage %s", lines[1])
+	}
+	if !strings.Contains(lines[2], `"usage":{"input":12,"output":3}`) {
+		t.Fatalf("assistant line %s", lines[2])
+	}
+
+	loaded, err := Resume(home, dir, w.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = loaded.Writer.Close() })
+	if loaded.Messages[0].Usage != nil {
+		t.Fatal("user usage")
+	}
+	got := loaded.Messages[1].Usage
+	if got == nil || got.Input != 12 || got.Output != 3 {
+		t.Fatalf("usage %+v", got)
+	}
+}
+
 func readLines(t *testing.T, path string) []string {
 	t.Helper()
 	data, err := os.ReadFile(path)

@@ -218,6 +218,9 @@ func applyRecord(line []byte, parsed *parsedSession) (parsedSession, error) {
 		if strings.TrimSpace(rec.Message.Role) == "" {
 			return parsedSession{}, fmt.Errorf("message has no role")
 		}
+		if rec.Usage != nil {
+			rec.Message.Usage = &llm.Usage{Input: rec.Usage.Input, Output: rec.Usage.Output}
+		}
 		next.msgIndex[kind.Seq] = len(next.messages)
 		next.messages = append(next.messages, rec.Message)
 		next.messageSkills = append(next.messageSkills, []SavedSkill{})

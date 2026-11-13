@@ -31,6 +31,8 @@ func (s *Session) skillsOn(line string) []skill.Skill {
 }
 
 func (s *Session) refreshPrompt() {
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
 	if len(s.messages) == 0 || s.messages[0].Role != "system" {
 		return
 	}

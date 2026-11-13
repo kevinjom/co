@@ -779,6 +779,47 @@ func TestSlashListGroupsSkills(t *testing.T) {
 	}
 }
 
+func TestStatsPrintsSessionCounts(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().session.Restore([]llm.Message{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "hello", Usage: &llm.Usage{Input: 11, Output: 4}},
+	})
+	m.input.SetValue("/stats")
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if cmd != nil || got.tab().busy {
+		t.Fatal("stats started a turn")
+	}
+	plain := ansi.Strip(got.renderTranscript())
+	for _, want := range []string{
+		"user turns: 1",
+		"assistant answers: 1",
+		"tool calls: 0",
+		"tokens: 11 in, 4 out",
+		"context: 11 in",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("missing %q in %q", want, plain)
+		}
+	}
+	if strings.Contains(plain, "❯ /stats") {
+		t.Fatal("command was sent as a chat turn")
+	}
+}
+
+func TestStatsNeedsASession(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().session = nil
+	m.input.SetValue("/stats")
+	updated, _ := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	plain := ansi.Strip(got.renderTranscript())
+	if !strings.Contains(plain, "select a model with /models") {
+		t.Fatalf("view %q", plain)
+	}
+}
+
 func TestSkillCommandInsertsTheName(t *testing.T) {
 	m := newTestModel(t)
 	m.director = &fakeDirector{

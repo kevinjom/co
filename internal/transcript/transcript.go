@@ -43,12 +43,20 @@ type sessionHeader struct {
 }
 
 type messageRecord struct {
-	Type        string      `json:"type"`
-	V           int         `json:"v"`
-	Seq         int         `json:"seq"`
-	TS          string      `json:"ts"`
-	Interrupted bool        `json:"interrupted"`
-	Message     llm.Message `json:"message"`
+	Type        string       `json:"type"`
+	V           int          `json:"v"`
+	Seq         int          `json:"seq"`
+	TS          string       `json:"ts"`
+	Interrupted bool         `json:"interrupted"`
+	Message     llm.Message  `json:"message"`
+	Usage       *storedUsage `json:"usage,omitempty"`
+}
+
+// storedUsage is the provider count for the model request that wrote the message.
+// It is omitted when the provider did not report one.
+type storedUsage struct {
+	Input  int `json:"input"`
+	Output int `json:"output"`
 }
 
 type modelRecord struct {
@@ -170,12 +178,20 @@ func (w *Writer) Record(msg llm.Message, interrupted bool) error {
 			TS:          time.Now().UTC().Format(time.RFC3339Nano),
 			Interrupted: interrupted,
 			Message:     msg,
+			Usage:       storedUsageFrom(msg),
 		}
 	}); err != nil {
 		return err
 	}
 	w.lastMessage = w.seq
 	return nil
+}
+
+func storedUsageFrom(msg llm.Message) *storedUsage {
+	if msg.Usage == nil {
+		return nil
+	}
+	return &storedUsage{Input: msg.Usage.Input, Output: msg.Usage.Output}
 }
 
 // RecordModel appends one model-change line.

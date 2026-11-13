@@ -26,6 +26,8 @@ func TestParse(t *testing.T) {
 		{line: "/theme", kind: KindTheme},
 		{line: "/theme rose", kind: KindTheme, arg: "rose"},
 		{line: "/theme rose extra", kind: KindError},
+		{line: "/stats", kind: KindStats},
+		{line: "/stats extra", kind: KindError},
 		{line: "/skill", kind: KindSkill},
 		{line: "/skill grilling", kind: KindChat, arg: "/skill grilling"},
 		{line: "/skill grilling extra", kind: KindChat, arg: "/skill grilling extra"},
@@ -59,7 +61,7 @@ func TestSlashCommandsAreKnown(t *testing.T) {
 }
 
 func TestComplete(t *testing.T) {
-	commands := []string{"/models", "/connect", "/new", "/sessions", "/theme", "/skill"}
+	commands := []string{"/models", "/connect", "/new", "/sessions", "/stats", "/theme", "/skill"}
 	cases := []struct {
 		stem   string
 		index  int
@@ -70,14 +72,15 @@ func TestComplete(t *testing.T) {
 		{stem: "/m", value: "/models", names: []string{"/models"}},
 		{stem: "/c", value: "/connect", names: []string{"/connect"}},
 		{stem: "/n", value: "/new", names: []string{"/new"}},
-		{stem: "/s", value: "/sessions", names: []string{"/sessions", "/skill"}},
+		{stem: "/s", value: "/sessions", names: []string{"/sessions", "/stats", "/skill"}},
 		{stem: "/t", value: "/theme", names: []string{"/theme"}},
 		{stem: "/", value: "/models", names: commands},
 		{stem: "/", index: 1, value: "/connect", names: commands},
 		{stem: "/", index: 2, value: "/new", names: commands},
-		{stem: "/", index: 4, value: "/theme", names: commands},
-		{stem: "/", index: 5, value: "/skill", names: commands},
-		{stem: "/", index: 6, value: "/models", names: commands},
+		{stem: "/", index: 4, value: "/stats", names: commands},
+		{stem: "/", index: 5, value: "/theme", names: commands},
+		{stem: "/", index: 6, value: "/skill", names: commands},
+		{stem: "/", index: 7, value: "/models", names: commands},
 		{stem: "/models", names: []string{"/models"}},
 		{stem: "/connect", names: []string{"/connect"}},
 		{stem: "/nope"},
@@ -87,7 +90,7 @@ func TestComplete(t *testing.T) {
 		{
 			stem:   "/",
 			value:  "/models",
-			names:  []string{"/models", "/connect", "/new", "/sessions", "/theme", "/skill", "/grilling", "/notes"},
+			names:  []string{"/models", "/connect", "/new", "/sessions", "/stats", "/theme", "/skill", "/grilling", "/notes"},
 			skills: []string{"notes", "grilling"},
 		},
 		{

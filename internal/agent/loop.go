@@ -37,6 +37,7 @@ type Session struct {
 	lsp           bool
 	titleWG       sync.WaitGroup
 	titleMu       sync.Mutex
+	msgMu         sync.Mutex
 	title         string
 	onTitle       func(string)
 }
@@ -98,12 +99,14 @@ func (s *Session) Model() string {
 
 // DropRecorder turns history off for the rest of the process.
 func (s *Session) DropRecorder() {
-	s.recorder = nil
+	s.dropRecorder()
 }
 
 // Restore appends messages from an earlier run after the system prompt.
 // Those messages are not written again.
 func (s *Session) Restore(messages []llm.Message) {
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
 	s.messages = append(s.messages, messages...)
 	for range messages {
 		s.attached = append(s.attached, nil)
@@ -113,7 +116,12 @@ func (s *Session) Restore(messages []llm.Message) {
 // BindSkills attaches skills to messages restored onto a fresh session.
 // skills[i] belongs to restored message i. The stored message text is unchanged.
 func (s *Session) BindSkills(skills [][]skill.Skill) {
-	if s == nil || len(skills) == 0 || len(s.attached) != len(skills)+1 {
+	if s == nil || len(skills) == 0 {
+		return
+	}
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
+	if len(s.attached) != len(skills)+1 {
 		return
 	}
 	for i, group := range skills {
@@ -123,6 +131,8 @@ func (s *Session) BindSkills(skills [][]skill.Skill) {
 
 // Messages returns a copy of the conversation, including the system prompt.
 func (s *Session) Messages() []llm.Message {
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
 	out := make([]llm.Message, len(s.messages))
 	copy(out, s.messages)
 	return out
@@ -142,7 +152,7 @@ func (s *Session) Reply(ctx context.Context, lines []string, observe Observer) (
 	if len(lines) == 0 {
 		return "", nil
 	}
-	first := !hasUserMessage(s.messages)
+	first := !s.hasUserMessage()
 	for _, line := range lines {
 		s.keep(llm.Message{Role: "user", Content: line}, false, s.skillsOn(line))
 	}
@@ -223,28 +233,39 @@ func (s *Session) remember(msg llm.Message, interrupted bool) {
 // keep stores msg and any skills that line named.
 // The skill text is not part of msg. wireMessages appends it when calling the model.
 func (s *Session) keep(msg llm.Message, interrupted bool, skills []skill.Skill) {
+	s.msgMu.Lock()
 	s.messages = append(s.messages, msg)
 	s.attached = append(s.attached, skills)
-	if s.recorder == nil {
+	recorder := s.recorder
+	s.msgMu.Unlock()
+	if recorder == nil {
 		return
 	}
-	if err := s.recorder.Record(msg, interrupted); err != nil {
+	if err := recorder.Record(msg, interrupted); err != nil {
 		slog.Warn("session history disabled", "err", err)
-		s.recorder = nil
+		s.dropRecorder()
 		return
 	}
 	for _, sk := range skills {
-		if err := s.recorder.RecordSkillUse(sk.Name, sk.Dir, sk.Body); err != nil {
+		if err := recorder.RecordSkillUse(sk.Name, sk.Dir, sk.Body); err != nil {
 			slog.Warn("session history disabled", "err", err)
-			s.recorder = nil
+			s.dropRecorder()
 			return
 		}
 	}
 }
 
+func (s *Session) dropRecorder() {
+	s.msgMu.Lock()
+	s.recorder = nil
+	s.msgMu.Unlock()
+}
+
 // wireMessages is the chat request. A stored user line that named a skill
 // is copied with that skill's text appended, so later turns send the same bytes.
 func (s *Session) wireMessages() []llm.Message {
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
 	out := make([]llm.Message, len(s.messages))
 	copy(out, s.messages)
 	for i := range out {
@@ -273,8 +294,10 @@ func (s *Session) runTools(ctx context.Context, calls []llm.ToolCall, observe Ob
 	}
 }
 
-func hasUserMessage(messages []llm.Message) bool {
-	for _, msg := range messages {
+func (s *Session) hasUserMessage() bool {
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
+	for _, msg := range s.messages {
 		if msg.Role == "user" {
 			return true
 		}

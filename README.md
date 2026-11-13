@@ -1,6 +1,7 @@
 # co
-
-![co](docs/logo.svg)  
+<p>
+    <a href="docs/logo.svg"><img width="220" alt="co" src="docs/logo.svg"></a><br>
+</p>
 
 
 🚧 **Status:** actively under development and not stable. Interfaces, behavior, and the on-disk config may change without notice.

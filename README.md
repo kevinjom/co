@@ -1,20 +1,25 @@
 # co
 
-<p>
-    <a href="docs/logo.svg"><img width="220" alt="co" src="docs/logo.svg"></a><br>
-</p>
+![co](docs/logo.svg)  
 
 
 🚧 **Status:** actively under development and not stable. Interfaces, behavior, and the on-disk config may change without notice.
 
 `co` is a coding assistant for the directory you start it in.
 
-The handbook is at <https://kevinjom.github.io/co>. It is published from the latest stable release.
+The handbook is at [https://kevinjom.github.io/co](https://kevinjom.github.io/co). It is published from the latest stable release.
 
 ## Install
 
-```
+Latest release:
+
+```sh
 curl -fsSL https://raw.githubusercontent.com/kevinjom/co/main/install.sh | sh
+```
+
+A specific version:
+
+```sh
 curl -fsSL https://raw.githubusercontent.com/kevinjom/co/main/install.sh | sh -s -- 0.1.0
 ```
 

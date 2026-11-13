@@ -3,8 +3,15 @@ title: Install
 description: Install co with the install script, from a checkout, or with go install.
 ---
 
-```
+Latest release:
+
+```sh
 curl -fsSL https://raw.githubusercontent.com/kevinjom/co/main/install.sh | sh
+```
+
+A specific version:
+
+```sh
 curl -fsSL https://raw.githubusercontent.com/kevinjom/co/main/install.sh | sh -s -- 0.1.0
 ```
 

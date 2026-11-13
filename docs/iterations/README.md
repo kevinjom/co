@@ -15,3 +15,4 @@ Name the new file `<seq>-<features>.md`, using the next sequence number. Put tha
 | 02 | [Providers, sessions, and a fullscreen transcript](02-providers-sessions-fullscreen.md) | `b745a2560c5627cab47f4723e4b9ed033b82fdd6` | generate session title |
 | 03 | [Sessions, language tools, and themes](03-sessions-tools-themes.md) | `9a1897f9ed3643b656a1c7d6f87e29e824555ddf` | feat: @ to trigger fuzzy search files |
 | 04 | [Writes and skills](04-writes-and-skills.md) | `f0999e064bbd2e500da8442ed41b7ff778f12394` | Merge pull request #4 from kevinjom/feat/skills |
+| 05 | [Bash and the handbook](05-bash-and-handbook.md) | `33963cf1032f5548444efdf4b4b4761a7374b73e` | chore: correct logo size in readme |

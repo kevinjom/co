@@ -1,4 +1,7 @@
-# Bash
+---
+title: Bash
+description: What a bash tool call can read, write, and how long it may run.
+---
 
 `co` runs one shell command when the model calls `bash`. The argument is `command`, a string. There is no allowlist and no working-directory argument. The command starts as soon as the model calls the tool. The code lives in `internal/tools`.
 

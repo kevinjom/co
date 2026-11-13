@@ -137,7 +137,7 @@ The choice is written to `~/.co/config.yaml` unless `--config` was set. An isola
 
 ## Language servers
 
-`co` speaks the Language Server Protocol as a client. The details are in [docs/lsp.md](../lsp.md). The short form:
+`co` speaks the Language Server Protocol as a client. The details are in [the language server page](../../site/src/content/docs/tools/lsp.md). The short form:
 
 The tools are registered only when at least one server binary is on `PATH`. If none is, `co` logs `language tools disabled` and the model keeps `grep`. CI does not install `gopls`. The only row shipped is `gopls` with no arguments, for `.go` files. The process starts on the first call that needs it, not at startup. Its working directory is the directory `co` was started in. The process is not jailed. `gopls` may read the module cache. Tool results do not include the body of a file outside the working directory.
 

@@ -13,6 +13,7 @@ import (
 	"github.com/kevinjom/co/internal/command"
 	"github.com/kevinjom/co/internal/config"
 	"github.com/kevinjom/co/internal/logs"
+	"github.com/kevinjom/co/internal/mcp"
 	"github.com/kevinjom/co/internal/provider"
 	"github.com/kevinjom/co/internal/theme"
 	"github.com/kevinjom/co/internal/transcript"
@@ -232,6 +233,10 @@ func start(cmd *cobra.Command, modelOverride string) error {
 	if err != nil {
 		return err
 	}
+	servers, err := mcp.Load(home)
+	if err != nil {
+		return err
+	}
 
 	signals := startSignals(cmd.Context())
 	defer signals.close()
@@ -245,6 +250,9 @@ func start(cmd *cobra.Command, modelOverride string) error {
 		settings.MaxToolRounds,
 	)
 	defer app.Close()
+	if len(servers) > 0 {
+		app.UseMCP(mcp.New(servers))
+	}
 
 	resumeID := settings.Resume
 	interactive := isTerminal(cmd.InOrStdin()) && isTerminal(cmd.OutOrStdout())

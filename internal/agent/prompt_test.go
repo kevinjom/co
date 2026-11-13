@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -67,7 +68,7 @@ func TestSystemPromptNamesOneSearch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := systemPrompt(cwd, tt.lsp, nil, tt.search)
+			got := systemPrompt(cwd, tt.lsp, nil, tt.search, false)
 			if !strings.Contains(got, tt.want) {
 				t.Fatalf("prompt missing %q\n%s", tt.want, got)
 			}
@@ -105,6 +106,35 @@ func TestNewSessionPromptUsesInstalledSearch(t *testing.T) {
 	if offersGrep(session.defs) != (search == "grep") {
 		t.Fatalf("grep offered=%t search=%s", offersGrep(session.defs), search)
 	}
+}
+
+func TestEnableMCPMentionsTools(t *testing.T) {
+	t.Parallel()
+
+	session := NewSession(openai.New("http://127.0.0.1:1"), "m", t.TempDir(), nil)
+	before := session.Messages()[0].Content
+	session.EnableMCP(idleMCP{})
+	after := session.Messages()[0].Content
+	if strings.Contains(before, "mcp_search") {
+		t.Fatalf("prompt before enable %q", before)
+	}
+	if !strings.Contains(after, "mcp_search") || !strings.Contains(after, "mcp_call") {
+		t.Fatalf("prompt %q", after)
+	}
+	found := map[string]bool{}
+	for _, def := range session.defs {
+		found[def.Function.Name] = true
+	}
+	if !found["mcp_search"] || !found["mcp_call"] {
+		t.Fatalf("tools %#v", session.defs)
+	}
+}
+
+type idleMCP struct{}
+
+func (idleMCP) Search(context.Context, string) (string, error) { return "", nil }
+func (idleMCP) Call(context.Context, string, string, map[string]any) (string, error) {
+	return "", nil
 }
 
 func offersGrep(defs []llm.Tool) bool {

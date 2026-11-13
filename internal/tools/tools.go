@@ -44,6 +44,7 @@ const (
 type Set struct {
 	root        string
 	lang        Language
+	mcp         MCP
 	search      searcher
 	tools       []tool
 	bashTimeout time.Duration

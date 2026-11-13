@@ -42,6 +42,7 @@ export default defineConfig({
 					items: [
 						{ label: 'Bash', slug: 'tools/bash' },
 						{ label: 'Language server', slug: 'tools/lsp' },
+						{ label: 'MCP', slug: 'tools/mcp' },
 					],
 				},
 			],

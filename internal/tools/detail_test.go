@@ -17,6 +17,8 @@ func TestDetail(t *testing.T) {
 		{name: "search", tool: "web_search", args: map[string]any{"query": "golang http"}, want: `query="golang http"`},
 		{name: "fetch", tool: "web_fetch", args: map[string]any{"url": "https://go.dev"}, want: "https://go.dev"},
 		{name: "fetch blank", tool: "web_fetch", args: map[string]any{"url": "  "}, want: "url="},
+		{name: "mcp search", tool: "mcp_search", args: map[string]any{"query": "create issue"}, want: "create issue"},
+		{name: "mcp call", tool: "mcp_call", args: map[string]any{"server": "github", "tool": "create_issue"}, want: "github create_issue"},
 		{name: "bash", tool: "bash", args: map[string]any{"command": "echo hello\necho again"}, want: "echo hello echo again"},
 		{
 			name: "definition",

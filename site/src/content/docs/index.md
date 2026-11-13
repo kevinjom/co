@@ -16,4 +16,4 @@ A terminal on both stdin and stdout gets a Bubble Tea TUI, which can hold more t
 - [Install](install/) `co`, or run it locally with Ollama
 - [Providers](setup/providers/), [API keys](setup/api-keys/), and [settings](setup/settings/)
 - [Sessions and commands](use/sessions/)
-- [Tools](use/tools/), including [bash](tools/bash/) and the [language server](tools/lsp/)
+- [Tools](use/tools/), including [bash](tools/bash/), the [language server](tools/lsp/), and [MCP](tools/mcp/)

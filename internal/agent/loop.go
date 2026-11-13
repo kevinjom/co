@@ -35,6 +35,7 @@ type Session struct {
 	catalog       *skill.Catalog
 	attached      [][]skill.Skill
 	lsp           bool
+	mcp           bool
 	titleWG       sync.WaitGroup
 	titleMu       sync.Mutex
 	msgMu         sync.Mutex
@@ -58,7 +59,7 @@ func NewSession(client llm.Chatter, model, cwd string, recorder Recorder) *Sessi
 		messages: []llm.Message{
 			{
 				Role:    "system",
-				Content: systemPrompt(cwd, false, nil, set.Search()),
+				Content: systemPrompt(cwd, false, nil, set.Search(), false),
 			},
 		},
 	}
@@ -73,6 +74,18 @@ func (s *Session) EnableLSP(lang tools.Language) {
 	s.tools.EnableLSP(lang)
 	s.defs = toolDefinitions(s.tools)
 	s.lsp = true
+	s.refreshPrompt()
+}
+
+// EnableMCP adds mcp_search and mcp_call and tells the model to use them.
+// A nil catalog is ignored. No server is contacted here.
+func (s *Session) EnableMCP(cat tools.MCP) {
+	if cat == nil {
+		return
+	}
+	s.tools.EnableMCP(cat)
+	s.defs = toolDefinitions(s.tools)
+	s.mcp = true
 	s.refreshPrompt()
 }
 

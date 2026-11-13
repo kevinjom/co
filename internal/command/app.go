@@ -11,6 +11,7 @@ import (
 	"github.com/kevinjom/co/internal/llm"
 	"github.com/kevinjom/co/internal/llm/openai"
 	"github.com/kevinjom/co/internal/lsp"
+	"github.com/kevinjom/co/internal/mcp"
 	"github.com/kevinjom/co/internal/provider"
 	"github.com/kevinjom/co/internal/skill"
 	"github.com/kevinjom/co/internal/transcript"
@@ -34,6 +35,7 @@ type App struct {
 	running []running
 	model   string
 	lang    *lsp.Hub
+	mcp     *mcp.Hub
 	skills  *skill.Catalog
 }
 
@@ -217,6 +219,25 @@ func (a *App) Close() {
 			slog.Warn("closing language server", "err", err)
 		}
 	}
+	if a.mcp != nil {
+		if err := a.mcp.Close(); err != nil {
+			slog.Warn("closing mcp", "err", err)
+		}
+	}
+}
+
+// UseMCP shares one MCP hub with every session.
+// A nil hub, or a second call, does nothing. Servers are contacted on the first tool call.
+func (a *App) UseMCP(h *mcp.Hub) {
+	if a == nil || h == nil || a.mcp != nil {
+		return
+	}
+	a.mcp = h
+	for _, run := range a.running {
+		if run.session != nil {
+			run.session.EnableMCP(h)
+		}
+	}
 }
 
 func (a *App) use(ctx context.Context, raw string, persist bool, target *agent.Session) error {
@@ -263,6 +284,9 @@ func (a *App) newSession(client llm.Chatter, wire string, recorder agent.Recorde
 	session.SetMaxToolRounds(a.maxToolRounds)
 	if a.lang != nil && a.lang.Available() {
 		session.EnableLSP(a.lang)
+	}
+	if a.mcp != nil {
+		session.EnableMCP(a.mcp)
 	}
 	return session
 }

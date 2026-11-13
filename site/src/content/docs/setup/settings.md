@@ -3,7 +3,7 @@ title: Settings
 description: The settings file, which file wins, and the flags co reads.
 ---
 
-The first run creates `~/.co/config.yaml` and `~/.co/models.yaml` when either file is missing. A later run leaves an existing file as it is. `--config` does not create the home files.
+The first run creates `~/.co/config.yaml` and `~/.co/models.yaml` when either file is missing. A later run leaves an existing file as it is. `--config` does not create the home files. MCP servers, when you want them, go in `~/.co/mcp.yaml`. That file is not created for you. See [MCP](../../tools/mcp/).
 
 `~/.co/config.yaml` is the settings file. It holds the default model and the flags that are safe to keep. The generated file has the flags below and no `model` key. Choosing a model adds that key:
 

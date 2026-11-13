@@ -3,7 +3,7 @@ title: Tools
 description: The tools the model can call, and the directory jail around file tools.
 ---
 
-The model gets filesystem tools, jailed to the working directory, a shell command, web search and page fetch, and language-server tools when a server binary is on `PATH`. Today that is `gopls` for `.go` files. See [Language server](../../tools/lsp/) and [Bash](../../tools/bash/).
+The model gets filesystem tools, jailed to the working directory, a shell command, web search and page fetch, and language-server tools when a server binary is on `PATH`. Today that is `gopls` for `.go` files. MCP servers in `~/.co/mcp.yaml` add `mcp_search` and `mcp_call`. See [Language server](../../tools/lsp/), [Bash](../../tools/bash/), and [MCP](../../tools/mcp/).
 
 | Tool | |
 | --- | --- |
@@ -20,5 +20,7 @@ The model gets filesystem tools, jailed to the working directory, a shell comman
 | `lsp_hover` | Hover text from the language server. |
 | `lsp_symbols` | Symbols in one file (`path`) or a workspace search (`query`). |
 | `lsp_diagnostics` | Diagnostics for one file, or the workspace when `path` is omitted. |
+| `mcp_search` | Search MCP servers configured in `~/.co/mcp.yaml`. |
+| `mcp_call` | Call one tool from an `mcp_search` hit. |
 
 Paths are resolved, and a path that leaves the directory is rejected. `create_file` only creates a missing file. `edit_file` replaces one snippet that appears once. Line and column start at 1. A language-server result may name a file outside the working directory, and it does not include that file's body. Rename, formatting, and code actions are not tools.

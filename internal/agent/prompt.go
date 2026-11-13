@@ -7,7 +7,7 @@ import (
 	"github.com/kevinjom/co/internal/skill"
 )
 
-func systemPrompt(cwd string, lsp bool, listed []skill.Skill, search string) string {
+func systemPrompt(cwd string, lsp bool, listed []skill.Skill, search string, mcpOn bool) string {
 	instruction := searchInstruction(search)
 	lines := []string{
 		"You are co, a coding assistant.",
@@ -37,6 +37,12 @@ func systemPrompt(cwd string, lsp bool, listed []skill.Skill, search string) str
 			"Prefer lsp_definition, lsp_references, lsp_hover, lsp_symbols, and lsp_diagnostics over "+search+" for definitions, references, and diagnostics.",
 			"Use lsp_symbols or lsp_diagnostics when the question is about a named file's symbols or diagnostics.",
 			"Use lsp_definition, lsp_references, or lsp_hover once a line and column are known.",
+		)
+	}
+	if mcpOn {
+		lines = append(lines,
+			"Find an MCP tool with mcp_search, using words from the task.",
+			"Call it with mcp_call. Pass the server, the tool, and the arguments from the input schema.",
 		)
 	}
 	if len(listed) > 0 {

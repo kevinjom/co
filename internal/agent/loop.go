@@ -116,7 +116,12 @@ func (s *Session) Restore(messages []llm.Message) {
 // BindSkills attaches skills to messages restored onto a fresh session.
 // skills[i] belongs to restored message i. The stored message text is unchanged.
 func (s *Session) BindSkills(skills [][]skill.Skill) {
-	if s == nil || len(skills) == 0 || len(s.attached) != len(skills)+1 {
+	if s == nil || len(skills) == 0 {
+		return
+	}
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
+	if len(s.attached) != len(skills)+1 {
 		return
 	}
 	for i, group := range skills {

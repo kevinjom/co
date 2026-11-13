@@ -77,6 +77,13 @@ func (s *Session) setTitle(title string) {
 	}
 }
 
+func (s *Session) titler() titler {
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
+	t, _ := s.recorder.(titler)
+	return t
+}
+
 // storeFallbackTitle writes the first line of the prompt, at most ten words.
 // The model name replaces it when the background request returns. A naming failure leaves this one.
 func (s *Session) storeFallbackTitle(userText string) {
@@ -85,8 +92,8 @@ func (s *Session) storeFallbackTitle(userText string) {
 		return
 	}
 	s.setTitle(title)
-	namer, ok := s.recorder.(titler)
-	if !ok {
+	namer := s.titler()
+	if namer == nil {
 		return
 	}
 	if err := namer.RecordTitle(title); err != nil {
@@ -97,8 +104,8 @@ func (s *Session) storeFallbackTitle(userText string) {
 // refineTitle asks the model for a short name from the first prompt.
 // The request runs beside the reply and uses only that prompt.
 func (s *Session) refineTitle(userText string) {
-	namer, ok := s.recorder.(titler)
-	if !ok || strings.TrimSpace(userText) == "" {
+	namer := s.titler()
+	if namer == nil || strings.TrimSpace(userText) == "" {
 		return
 	}
 	client := s.client

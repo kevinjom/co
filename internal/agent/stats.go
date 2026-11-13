@@ -26,8 +26,8 @@ type Stats struct {
 }
 
 // Stats counts completed messages in the session.
-// Turns still in flight are not included. A resumed session counts the
-// messages loaded from its transcript.
+// Messages still in flight, such as an answer being streamed, are not included.
+// A resumed session counts the messages loaded from its transcript.
 func (s *Session) Stats() Stats {
 	var st Stats
 	if s == nil {

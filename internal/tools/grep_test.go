@@ -19,7 +19,7 @@ func TestGrepSkipsGitAndCapsMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	set := New(root)
+	set := newSet(root, searchGrep)
 	got, err := set.Run(t.Context(), "grep", map[string]any{
 		"pattern": "secret-pattern",
 		"path":    ".",

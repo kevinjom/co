@@ -25,7 +25,7 @@ func (s *Set) EnableLSP(lang Language) {
 	}
 	s.lang = lang
 	s.tools = append(s.tools,
-		tool{schema: lspDefinitionSchema(), run: s.lspDefinition},
+		tool{schema: lspDefinitionSchema(s.search), run: s.lspDefinition},
 		tool{schema: lspReferencesSchema(), run: s.lspReferences},
 		tool{schema: lspHoverSchema(), run: s.lspHover},
 		tool{schema: lspSymbolsSchema(), run: s.lspSymbols},
@@ -60,10 +60,10 @@ func diagnosticsDetail(args map[string]any) string {
 	return "path=" + path
 }
 
-func lspDefinitionSchema() Schema {
+func lspDefinitionSchema(search searcher) Schema {
 	return Schema{
 		Name:        "lsp_definition",
-		Description: "Go to the definition of the symbol at a line and column. Line and column start at 1. Prefer this over grep for a declaration.",
+		Description: "Go to the definition of the symbol at a line and column. Line and column start at 1. Prefer this over " + string(search) + " for a declaration.",
 		Parameters:  objectSchema(positionProps(), []string{"path", "line", "column"}),
 	}
 }

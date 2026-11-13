@@ -7,7 +7,8 @@ import (
 	"github.com/kevinjom/co/internal/skill"
 )
 
-func systemPrompt(cwd string, lsp bool, listed []skill.Skill) string {
+func systemPrompt(cwd string, lsp bool, listed []skill.Skill, search string) string {
+	instruction := searchInstruction(search)
 	lines := []string{
 		"You are co, a coding assistant.",
 		"The working directory is " + cwd + ".",
@@ -24,6 +25,7 @@ func systemPrompt(cwd string, lsp bool, listed []skill.Skill) string {
 		"bash can read files outside the working directory and it can use the network.",
 		"bash can write anywhere.",
 		"Do not use bash to create or edit source files. Use create_file and edit_file.",
+		instruction,
 		"Do not invent file contents, line counts, search results, or page contents.",
 		"Use web_search when the answer is not in this directory.",
 		"Use web_fetch to read one http or https page.",
@@ -32,7 +34,7 @@ func systemPrompt(cwd string, lsp bool, listed []skill.Skill) string {
 	}
 	if lsp {
 		lines = append(lines,
-			"Prefer lsp_definition, lsp_references, lsp_hover, lsp_symbols, and lsp_diagnostics over grep for definitions, references, and diagnostics.",
+			"Prefer lsp_definition, lsp_references, lsp_hover, lsp_symbols, and lsp_diagnostics over "+search+" for definitions, references, and diagnostics.",
 			"Use lsp_symbols or lsp_diagnostics when the question is about a named file's symbols or diagnostics.",
 			"Use lsp_definition, lsp_references, or lsp_hover once a line and column are known.",
 		)
@@ -45,6 +47,19 @@ func systemPrompt(cwd string, lsp bool, listed []skill.Skill) string {
 		lines = append(lines, "When a message names a skill as /name, follow that skill for that turn only.")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func searchInstruction(search string) string {
+	switch search {
+	case "rg":
+		return "Search file contents with rg."
+	case "ag":
+		return "Search file contents with ag."
+	case "grep":
+		return "Search file contents with the grep tool."
+	default:
+		panic(fmt.Sprintf("unhandled search %q", search))
+	}
 }
 
 // withSkills appends each skill block to the typed line the model should see.

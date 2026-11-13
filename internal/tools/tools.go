@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -29,30 +30,76 @@ type tool struct {
 	run    runner
 }
 
+// searcher is how file contents are searched.
+// rg is preferred, then ag. The grep tool is registered only when both are missing.
+type searcher string
+
+const (
+	searchRg   searcher = "rg"
+	searchAg   searcher = "ag"
+	searchGrep searcher = "grep"
+)
+
 // Set is the tool surface for one working directory.
 type Set struct {
 	root        string
 	lang        Language
+	search      searcher
 	tools       []tool
 	bashTimeout time.Duration
 }
 
 // New returns the tools for root.
+// The grep tool is omitted when rg or ag is on PATH.
 func New(root string) *Set {
+	return newSet(root, detectSearch(commandOnPath))
+}
+
+func newSet(root string, search searcher) *Set {
+	switch search {
+	case searchRg, searchAg, searchGrep:
+	default:
+		panic(fmt.Sprintf("unhandled search %q", search))
+	}
 	set := &Set{
-		root: root,
+		root:   root,
+		search: search,
 	}
 	set.tools = []tool{
 		{schema: listDirSchema(), run: set.listDir},
 		{schema: readFileSchema(), run: set.readFile},
-		{schema: grepSchema(), run: set.grep},
-		{schema: createFileSchema(), run: set.createFile},
-		{schema: editFileSchema(), run: set.editFile},
-		{schema: bashSchema(), run: set.bash},
-		{schema: webSearchSchema(), run: set.webSearch},
-		{schema: webFetchSchema(), run: set.webFetch},
 	}
+	if search == searchGrep {
+		set.tools = append(set.tools, tool{schema: grepSchema(), run: set.grep})
+	}
+	set.tools = append(set.tools,
+		tool{schema: createFileSchema(), run: set.createFile},
+		tool{schema: editFileSchema(), run: set.editFile},
+		tool{schema: bashSchema(), run: set.bash},
+		tool{schema: webSearchSchema(), run: set.webSearch},
+		tool{schema: webFetchSchema(), run: set.webFetch},
+	)
 	return set
+}
+
+// Search is the file search the model should use: "rg", "ag", or "grep".
+func (s *Set) Search() string {
+	return string(s.search)
+}
+
+func detectSearch(exists func(string) bool) searcher {
+	if exists("rg") {
+		return searchRg
+	}
+	if exists("ag") {
+		return searchAg
+	}
+	return searchGrep
+}
+
+func commandOnPath(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
 }
 
 // Schemas returns the tool definitions in call order.

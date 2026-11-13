@@ -56,12 +56,8 @@ func NewSession(client llm.Chatter, model, cwd string, recorder Recorder) *Sessi
 		attached:      [][]skill.Skill{nil},
 		messages: []llm.Message{
 			{
-				Role: "system",
-				Content: systemPrompt(
-					cwd,
-					false,
-					nil,
-				),
+				Role:    "system",
+				Content: systemPrompt(cwd, false, nil, set.Search()),
 			},
 		},
 	}

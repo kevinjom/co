@@ -46,7 +46,8 @@ func TestEnableLSPMentionsTools(t *testing.T) {
 	}
 	session.EnableLSP(idleLanguage{})
 	after := session.Messages()[0].Content
-	if after == before || !strings.Contains(after, "lsp_definition") || !strings.Contains(after, "lsp_symbols or lsp_diagnostics") {
+	over := "over " + session.tools.Search() + " for definitions, references, and diagnostics."
+	if after == before || !strings.Contains(after, "lsp_definition") || !strings.Contains(after, "lsp_symbols or lsp_diagnostics") || !strings.Contains(after, over) {
 		t.Fatalf("prompt %q", after)
 	}
 }

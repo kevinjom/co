@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="co">
+  <title>co</title>
+  <rect width="1024" height="1024" fill="#ffffff"/>
+  <path fill="#2C1B4D" d="M 849.97 388.00 A 360 360 0 1 0 849.97 636.00 L 719.82 636.00 A 242 242 0 1 1 719.82 388.00 Z"/>
+  <path fill="#A3FED1" fill-rule="evenodd" d="M 677.00 512.00 A 165 165 0 1 0 347.00 512.00 A 165 165 0 1 0 677.00 512.00 M 589.00 512.00 A 77 77 0 1 0 435.00 512.00 A 77 77 0 1 0 589.00 512.00 Z"/>
+</svg>

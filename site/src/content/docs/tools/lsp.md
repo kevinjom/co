@@ -1,4 +1,7 @@
-# Language servers
+---
+title: Language server
+description: How co calls a language server, which tools exist, and what the server is shown.
+---
 
 `co` speaks the Language Server Protocol as a client. The model calls it the same way it calls `grep`. The server is asked for definitions, references, hover, symbols, and diagnostics. It is not asked to rename, format, or apply a code action.
 

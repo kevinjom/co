@@ -625,6 +625,14 @@ func (m *model) submit() tea.Cmd {
 			return m.openSkills()
 		}
 		return m.insertSkillName(parsed.Arg)
+	case command.KindStats:
+		m.input.Reset()
+		if m.session() == nil {
+			m.addBlock(block{kind: blockError, text: "select a model with /models"})
+			return nil
+		}
+		m.addBlock(block{kind: blockNote, text: m.session().Stats().Text()})
+		return nil
 	case command.KindError:
 		m.input.Reset()
 		m.addBlock(block{kind: blockError, text: parsed.Err.Error()})

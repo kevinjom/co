@@ -93,7 +93,7 @@ func (m *model) takeFilterCommand() (bool, tea.Cmd) {
 		m.paint()
 		return true, nil
 	case command.KindQuit, command.KindModels, command.KindConnect, command.KindNew,
-		command.KindSessions, command.KindTheme, command.KindSkill:
+		command.KindSessions, command.KindTheme, command.KindSkill, command.KindStats:
 		m.filter = ""
 		m.pickerErr = ""
 		m.mode = modeChat

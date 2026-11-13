@@ -11,6 +11,16 @@ type Message struct {
 	Content    string     `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+	// Usage is the provider count for the request that produced this message.
+	// It stays off the wire: later requests must not send it back.
+	Usage *Usage `json:"-"`
+}
+
+// Usage is a provider-reported token count for one model request.
+// A nil Usage means the provider did not report one.
+type Usage struct {
+	Input  int
+	Output int
 }
 
 // ToolCall is a function the model wants the harness to run.

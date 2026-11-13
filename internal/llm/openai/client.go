@@ -50,11 +50,18 @@ func NewEndpoint(baseURL, apiKey string, compat llm.Compat) *Client {
 }
 
 type chatRequest struct {
-	Model           string        `json:"model"`
-	Messages        []llm.Message `json:"messages"`
-	Tools           []llm.Tool    `json:"tools,omitempty"`
-	Stream          bool          `json:"stream"`
-	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []llm.Message  `json:"messages"`
+	Tools           []llm.Tool     `json:"tools,omitempty"`
+	Stream          bool           `json:"stream"`
+	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+}
+
+// streamOptions asks a streaming endpoint for a usage object.
+// OpenAI-compatible servers omit token counts unless this is set.
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 // apiMessage decodes a choice. Content is null when the model only calls tools.

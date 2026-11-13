@@ -460,3 +460,43 @@ func TestListModels(t *testing.T) {
 		t.Fatalf("ids %v", ids)
 	}
 }
+
+func TestChatStreamRecordsUsage(t *testing.T) {
+	var include bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			StreamOptions struct {
+				IncludeUsage bool `json:"include_usage"`
+			} `json:"stream_options"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode: %v", err)
+			return
+		}
+		include = payload.StreamOptions.IncludeUsage
+		writeSSE(
+			w,
+			contentChunk("hi"),
+			`{"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3}}`,
+		)
+	}))
+	defer server.Close()
+
+	msg, err := New(server.URL).ChatStream(t.Context(), "m", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !include {
+		t.Fatal("request did not ask for usage")
+	}
+	if msg.Content != "hi" || msg.Usage == nil || msg.Usage.Input != 12 || msg.Usage.Output != 3 {
+		t.Fatalf("message %+v usage %+v", msg, msg.Usage)
+	}
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "input") || strings.Contains(string(raw), "prompt_tokens") {
+		t.Fatalf("usage leaked into message json %s", raw)
+	}
+}

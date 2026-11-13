@@ -30,10 +30,11 @@ func (c *Client) ChatStream(
 	}
 
 	payload := chatRequest{
-		Model:    model,
-		Messages: messages,
-		Tools:    tools,
-		Stream:   true,
+		Model:         model,
+		Messages:      messages,
+		Tools:         tools,
+		Stream:        true,
+		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
 	if c.compat.ReasoningEffort {
 		payload.ReasoningEffort = defaultReasoningEffort
@@ -57,6 +58,14 @@ type streamChunk struct {
 			ToolCalls []streamToolCall `json:"tool_calls"`
 		} `json:"delta"`
 	} `json:"choices"`
+	Usage *streamUsage `json:"usage"`
+}
+
+// streamUsage is the OpenAI usage object. Pointers keep a JSON null from
+// failing the decode, and from looking like a reported zero.
+type streamUsage struct {
+	PromptTokens     *int `json:"prompt_tokens"`
+	CompletionTokens *int `json:"completion_tokens"`
 }
 
 type streamToolCall struct {
@@ -90,11 +99,12 @@ func (c *Client) stream(ctx context.Context, payload chatRequest, onChunk func(l
 
 	var content strings.Builder
 	var drafts []toolDraft
+	var usage *llm.Usage
 	seen := 0
 	sawChunk := false
 
 	fail := func(err error) (llm.Message, error) {
-		return llm.Message{Role: "assistant", Content: content.String()}, err
+		return llm.Message{Role: "assistant", Content: content.String(), Usage: usage}, err
 	}
 
 	for scanner.Scan() {
@@ -109,12 +119,16 @@ func (c *Client) stream(ctx context.Context, payload chatRequest, onChunk func(l
 			continue
 		}
 		if data == "[DONE]" {
-			return finishStream(content.String(), drafts)
+			return finishStream(content.String(), drafts, usage)
 		}
 
 		sawChunk = true
-		if err := c.applyChunk(data, &content, &drafts, onChunk); err != nil {
+		got, err := c.applyChunk(data, &content, &drafts, onChunk)
+		if err != nil {
 			return fail(fmt.Errorf("chat: %w", err))
+		}
+		if got != nil {
+			usage = got
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -126,7 +140,7 @@ func (c *Client) stream(ctx context.Context, payload chatRequest, onChunk func(l
 	if !sawChunk {
 		return llm.Message{}, fmt.Errorf("chat: empty stream")
 	}
-	return finishStream(content.String(), drafts)
+	return finishStream(content.String(), drafts, usage)
 }
 
 func sseData(line string) (string, bool) {
@@ -137,13 +151,23 @@ func sseData(line string) (string, bool) {
 	return strings.TrimSpace(strings.TrimPrefix(line, "data:")), true
 }
 
-func (c *Client) applyChunk(data string, content *strings.Builder, drafts *[]toolDraft, onChunk func(llm.StreamKind, string)) error {
+func (c *Client) applyChunk(data string, content *strings.Builder, drafts *[]toolDraft, onChunk func(llm.StreamKind, string)) (*llm.Usage, error) {
 	var chunk streamChunk
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-		return fmt.Errorf("decoding stream: %w", err)
+		return nil, fmt.Errorf("decoding stream: %w", err)
+	}
+	var usage *llm.Usage
+	if chunk.Usage != nil {
+		usage = &llm.Usage{}
+		if chunk.Usage.PromptTokens != nil {
+			usage.Input = *chunk.Usage.PromptTokens
+		}
+		if chunk.Usage.CompletionTokens != nil {
+			usage.Output = *chunk.Usage.CompletionTokens
+		}
 	}
 	if len(chunk.Choices) == 0 {
-		return nil
+		return usage, nil
 	}
 	delta := chunk.Choices[0].Delta
 	if delta.Content != nil && *delta.Content != "" {
@@ -156,7 +180,7 @@ func (c *Client) applyChunk(data string, content *strings.Builder, drafts *[]too
 		onChunk(llm.StreamReasoning, *delta.Reasoning)
 	}
 	appendToolCalls(drafts, delta.ToolCalls)
-	return nil
+	return usage, nil
 }
 
 func appendToolCalls(drafts *[]toolDraft, calls []streamToolCall) {
@@ -199,12 +223,12 @@ func toolIndex(drafts []toolDraft, call streamToolCall) int {
 	return len(drafts) - 1
 }
 
-func finishStream(content string, drafts []toolDraft) (llm.Message, error) {
+func finishStream(content string, drafts []toolDraft, usage *llm.Usage) (llm.Message, error) {
 	calls := make([]llm.ToolCall, 0, len(drafts))
 	for _, draft := range drafts {
 		args, err := decodeArguments(draft.args.String())
 		if err != nil {
-			return llm.Message{Role: "assistant", Content: content}, fmt.Errorf("chat: %w", err)
+			return llm.Message{Role: "assistant", Content: content, Usage: usage}, fmt.Errorf("chat: %w", err)
 		}
 		calls = append(calls, llm.ToolCall{
 			ID:   draft.id,
@@ -217,7 +241,9 @@ func finishStream(content string, drafts []toolDraft) (llm.Message, error) {
 		})
 	}
 	text := content
-	return apiMessage{Role: "assistant", Content: &text, ToolCalls: calls}.message(), nil
+	msg := apiMessage{Role: "assistant", Content: &text, ToolCalls: calls}.message()
+	msg.Usage = usage
+	return msg, nil
 }
 
 func decodeArguments(raw string) (llm.Arguments, error) {

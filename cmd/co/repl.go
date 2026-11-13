@@ -173,6 +173,14 @@ func runLineCommand(cmd *cobra.Command, signals *signalSession, app *command.App
 		}
 		fmt.Fprintf(stderr, "model %s\n", app.Model())
 		return true, nil
+	case command.KindStats:
+		session := app.Session()
+		if session == nil {
+			fmt.Fprintln(stderr, "select a model with /models")
+			return true, nil
+		}
+		fmt.Fprintln(stderr, session.Stats().Text())
+		return true, nil
 	case command.KindConnect:
 		if parsed.Arg == "" {
 			ids := app.Providers()

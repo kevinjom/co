@@ -32,6 +32,14 @@ The same toolchain installs the latest commit:
 go install github.com/kevinjom/co/cmd/co@latest
 ```
 
+## Update
+
+```sh
+co update
+```
+
+`co update` replaces the installed binary with the latest stable release for this system. When that release is already installed, it prints `already up to date`. A `go run` build updates the `co` on `PATH`, not the cache copy. A prerelease is not that release. The download is checked for an ELF or Mach-O header. A binary in a directory you cannot write is replaced with `sudo`.
+
 ## Run locally with Ollama
 
 With the `ollama` binary installed:

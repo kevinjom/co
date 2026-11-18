@@ -281,6 +281,56 @@ func chunkWith(field, text string) string {
 	return string(payload)
 }
 
+func TestChatStreamRetriesWhenThinkingUnsupported(t *testing.T) {
+	var efforts []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			ReasoningEffort string `json:"reasoning_effort"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode: %v", err)
+			return
+		}
+		efforts = append(efforts, payload.ReasoningEffort)
+		if payload.ReasoningEffort != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"\"qwen3-coder:30b\" does not support thinking","type":"invalid_request_error"}}`)
+			return
+		}
+		writeSSE(w, contentChunk("ok"))
+	}))
+	defer server.Close()
+
+	msg, err := New(server.URL).ChatStream(t.Context(), "qwen3-coder:30b", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Content != "ok" {
+		t.Fatalf("content %q", msg.Content)
+	}
+	if len(efforts) != 2 || efforts[0] != "low" || efforts[1] != "" {
+		t.Fatalf("efforts %q", efforts)
+	}
+}
+
+func TestChatStreamDoesNotRetryOtherErrors(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"message":"bad model"}}`)
+	}))
+	defer server.Close()
+
+	_, err := New(server.URL).ChatStream(t.Context(), "m", nil, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "bad model") {
+		t.Fatalf("err = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls %d", calls)
+	}
+}
+
 func TestChatStreamEmptyBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

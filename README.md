@@ -41,6 +41,14 @@ The same toolchain installs the latest commit:
 go install github.com/kevinjom/co/cmd/co@latest
 ```
 
+Update the installed binary to the latest stable release:
+
+```sh
+co update
+```
+
+When that release is already installed, `co update` prints `already up to date`. Running it with `go run` updates the `co` on `PATH`.
+
 ## License
 
 [MIT](LICENSE)

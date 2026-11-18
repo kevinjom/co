@@ -251,7 +251,7 @@ func start(cmd *cobra.Command, modelOverride string) error {
 	)
 	defer app.Close()
 	if len(servers) > 0 {
-		app.UseMCP(mcp.New(servers))
+		app.UseMCP(mcp.New(home, servers))
 	}
 
 	resumeID := settings.Resume

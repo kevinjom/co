@@ -18,10 +18,13 @@ func HomePath(home string) string {
 
 // Server is one Streamable HTTP endpoint.
 // Header values are sent exactly as written.
+// ClientID, when set, is the OAuth client used instead of dynamic registration.
 type Server struct {
-	Name    string
-	URL     string
-	Headers map[string]string
+	Name         string
+	URL          string
+	Headers      map[string]string
+	ClientID     string
+	ClientSecret string
 }
 
 // Load reads ~/.co/mcp.yaml.
@@ -97,19 +100,23 @@ func decodeServer(name string, node *yaml.Node) (Server, error) {
 		return Server{}, fmt.Errorf("reading mcp.yaml: server %q: expected a mapping", name)
 	}
 	var (
-		rawURL  string
-		seenURL bool
-		headers map[string]string
+		rawURL       string
+		seenURL      bool
+		headers      map[string]string
+		clientID     string
+		seenClient   bool
+		clientSecret string
 	)
 	for i := 0; i < len(node.Content); i += 2 {
 		key := node.Content[i].Value
 		val := node.Content[i+1]
 		switch key {
 		case "url":
-			if val.Kind != yaml.ScalarNode || val.Tag == "!!null" {
-				return Server{}, fmt.Errorf("reading mcp.yaml: server %q: url must be a string", name)
+			decoded, err := scalarString(name, "url", val)
+			if err != nil {
+				return Server{}, err
 			}
-			rawURL = val.Value
+			rawURL = decoded
 			seenURL = true
 		case "headers":
 			decoded, err := decodeHeaders(name, val)
@@ -117,6 +124,19 @@ func decodeServer(name string, node *yaml.Node) (Server, error) {
 				return Server{}, err
 			}
 			headers = decoded
+		case "client_id":
+			decoded, err := scalarString(name, "client_id", val)
+			if err != nil {
+				return Server{}, err
+			}
+			clientID = decoded
+			seenClient = true
+		case "client_secret":
+			decoded, err := scalarString(name, "client_secret", val)
+			if err != nil {
+				return Server{}, err
+			}
+			clientSecret = decoded
 		default:
 			return Server{}, fmt.Errorf("reading mcp.yaml: server %q: unknown field %q", name, key)
 		}
@@ -124,11 +144,32 @@ func decodeServer(name string, node *yaml.Node) (Server, error) {
 	if !seenURL || strings.TrimSpace(rawURL) == "" {
 		return Server{}, fmt.Errorf("reading mcp.yaml: server %q: url is required", name)
 	}
+	if seenClient && strings.TrimSpace(clientID) == "" {
+		return Server{}, fmt.Errorf("reading mcp.yaml: server %q: client_id is empty", name)
+	}
+	if clientSecret != "" && clientID == "" {
+		return Server{}, fmt.Errorf("reading mcp.yaml: server %q: client_secret requires client_id", name)
+	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return Server{}, fmt.Errorf("reading mcp.yaml: server %q: url must be http or https", name)
 	}
-	return Server{Name: name, URL: rawURL, Headers: headers}, nil
+	return Server{
+		Name:         name,
+		URL:          rawURL,
+		Headers:      headers,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+	}, nil
+}
+
+func scalarString(name, field string, val *yaml.Node) (string, error) {
+	switch {
+	case val.Kind != yaml.ScalarNode, val.Tag == "!!null", val.Tag == "!!int", val.Tag == "!!float", val.Tag == "!!bool":
+		return "", fmt.Errorf("reading mcp.yaml: server %q: %s must be a string", name, field)
+	default:
+		return val.Value, nil
+	}
 }
 
 func decodeHeaders(name string, node *yaml.Node) (map[string]string, error) {

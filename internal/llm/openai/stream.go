@@ -40,6 +40,12 @@ func (c *Client) ChatStream(
 		payload.ReasoningEffort = defaultReasoningEffort
 	}
 	msg, err := c.stream(ctx, payload, onChunk)
+	// Ollama maps reasoning_effort onto thinking and rejects models that lack it,
+	// such as qwen3-coder. Ask once more without the field.
+	if err != nil && ctx.Err() == nil && payload.ReasoningEffort != "" && thinkingUnsupported(err) {
+		payload.ReasoningEffort = ""
+		msg, err = c.stream(ctx, payload, onChunk)
+	}
 	if err != nil && ctx.Err() != nil {
 		msg.ToolCalls = nil
 		if msg.Role == "" {
@@ -48,6 +54,10 @@ func (c *Client) ChatStream(
 		return msg, ctx.Err()
 	}
 	return msg, err
+}
+
+func thinkingUnsupported(err error) bool {
+	return strings.Contains(err.Error(), "does not support thinking")
 }
 
 type streamChunk struct {

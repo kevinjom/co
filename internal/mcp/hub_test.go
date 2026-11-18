@@ -13,7 +13,7 @@ import (
 )
 
 func TestSearchCapsAndOrders(t *testing.T) {
-	hub := New([]Server{
+	hub := New("", []Server{
 		{Name: "beta", URL: "https://beta.example/mcp"},
 		{Name: "alpha", URL: "https://alpha.example/mcp"},
 	})
@@ -61,7 +61,7 @@ func TestSearchCapsAndOrders(t *testing.T) {
 }
 
 func TestSearchNamesUnavailable(t *testing.T) {
-	hub := New([]Server{{Name: "github", URL: "https://github.example/mcp"}})
+	hub := New("", []Server{{Name: "github", URL: "https://github.example/mcp"}})
 	hub.rows["github"].fetch = func(context.Context) ([]toolEntry, int, error) {
 		return nil, 0, errors.New("connect refused")
 	}
@@ -75,7 +75,7 @@ func TestSearchNamesUnavailable(t *testing.T) {
 }
 
 func TestSearchEmptyQuery(t *testing.T) {
-	hub := New([]Server{{Name: "github", URL: "https://github.example/mcp"}})
+	hub := New("", []Server{{Name: "github", URL: "https://github.example/mcp"}})
 	calls := 0
 	hub.rows["github"].fetch = func(context.Context) ([]toolEntry, int, error) {
 		calls++
@@ -91,7 +91,7 @@ func TestSearchEmptyQuery(t *testing.T) {
 
 func TestCatalogCache(t *testing.T) {
 	now := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
-	hub := New([]Server{{Name: "github", URL: "https://github.example/mcp"}})
+	hub := New("", []Server{{Name: "github", URL: "https://github.example/mcp"}})
 	hub.now = func() time.Time { return now }
 	calls := 0
 	hub.rows["github"].fetch = func(context.Context) ([]toolEntry, int, error) {
@@ -117,7 +117,7 @@ func TestCatalogCache(t *testing.T) {
 }
 
 func TestCatalogZeroTTLRefetches(t *testing.T) {
-	hub := New([]Server{{Name: "github", URL: "https://github.example/mcp"}})
+	hub := New("", []Server{{Name: "github", URL: "https://github.example/mcp"}})
 	calls := 0
 	hub.rows["github"].fetch = func(context.Context) ([]toolEntry, int, error) {
 		calls++

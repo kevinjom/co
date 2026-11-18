@@ -68,6 +68,8 @@ func TestLoadRejects(t *testing.T) {
 		{name: "scheme", body: "github:\n  url: ftp://example.com/mcp\n"},
 		{name: "unknown", body: "github:\n  url: https://example.com/mcp\n  command: npx\n"},
 		{name: "header", body: "github:\n  url: https://example.com/mcp\n  headers:\n    A:\n      nested: 1\n"},
+		{name: "secret", body: "github:\n  url: https://example.com/mcp\n  client_secret: s\n"},
+		{name: "blank client", body: "github:\n  url: https://example.com/mcp\n  client_id: \" \"\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

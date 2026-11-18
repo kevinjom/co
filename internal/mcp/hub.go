@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -21,33 +22,39 @@ const requestTimeout = 2 * time.Minute
 type Hub struct {
 	servers []Server
 	client  *mcp.Client
+	tokens  *tokenStore
 	mu      sync.Mutex
+	login   sync.Mutex
 	rows    map[string]*row
 	closed  bool
 	now     func() time.Time
 }
 
 type row struct {
-	hub      *Hub
-	spec     Server
-	mu       sync.Mutex
-	session  *mcp.ClientSession
-	tools    []toolEntry
-	expires  time.Time
-	have     bool
-	closed   bool
-	rejected error
+	hub           *Hub
+	spec          Server
+	mu            sync.Mutex
+	session       *mcp.ClientSession
+	tools         []toolEntry
+	expires       time.Time
+	have          bool
+	closed        bool
+	rejected      error
+	oauth         auth.OAuthHandler
+	pendingIssuer string
 	// fetch replaces the remote list in tests.
 	fetch func(context.Context) ([]toolEntry, int, error)
 }
 
 // New returns a hub for servers.
+// home is the directory that holds ~/.co; pass "" in tests that do not log in.
 // No server is contacted until a search or a call.
-func New(servers []Server) *Hub {
+func New(home string, servers []Server) *Hub {
 	copied := make([]Server, len(servers))
 	copy(copied, servers)
 	h := &Hub{
 		servers: copied,
+		tokens:  openTokenStore(home),
 		client: mcp.NewClient(&mcp.Implementation{Name: "co", Version: "dev"}, &mcp.ClientOptions{
 			Capabilities:   &mcp.ClientCapabilities{},
 			MultiRoundTrip: &mcp.MultiRoundTripOptions{Disabled: true},
@@ -144,7 +151,7 @@ func (h *Hub) alive() error {
 }
 
 func (r *row) catalog(ctx context.Context) ([]toolEntry, error) {
-	ctx, cancel := bound(ctx)
+	ctx, cancel := r.bound(ctx)
 	defer cancel()
 
 	r.mu.Lock()
@@ -233,7 +240,7 @@ func (r *row) listLocked(ctx context.Context) ([]toolEntry, int, error) {
 }
 
 func (r *row) call(ctx context.Context, tool string, args map[string]any) (string, error) {
-	ctx, cancel := bound(ctx)
+	ctx, cancel := r.bound(ctx)
 	defer cancel()
 
 	r.mu.Lock()
@@ -269,12 +276,20 @@ func (r *row) sessionLocked(ctx context.Context) (*mcp.ClientSession, error) {
 	if r.session != nil {
 		return r.session, nil
 	}
-	session, err := r.hub.client.Connect(ctx, &mcp.StreamableClientTransport{
+	transport := &mcp.StreamableClientTransport{
 		Endpoint:             r.spec.URL,
 		HTTPClient:           httpClient(r.spec.Headers),
 		MaxRetries:           -1,
 		DisableStandaloneSSE: true,
-	}, &mcp.ClientSessionOptions{ProtocolVersion: ProtocolVersion})
+	}
+	if !hasAuthorization(r.spec.Headers) {
+		handler, err := r.oauthHandler()
+		if err != nil {
+			return nil, err
+		}
+		transport.OAuthHandler = handler
+	}
+	session, err := r.hub.client.Connect(ctx, transport, &mcp.ClientSessionOptions{ProtocolVersion: ProtocolVersion})
 	if err != nil {
 		return nil, err
 	}
@@ -323,11 +338,15 @@ func (h *Hub) clock() time.Time {
 	return time.Now()
 }
 
-func bound(ctx context.Context) (context.Context, context.CancelFunc) {
+func (r *row) bound(ctx context.Context) (context.Context, context.CancelFunc) {
+	limit := requestTimeout
+	if !hasAuthorization(r.spec.Headers) {
+		limit = oauthTimeout
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithTimeout(ctx, requestTimeout)
+	return context.WithTimeout(ctx, limit)
 }
 
 func schemaJSON(schema any) (string, error) {

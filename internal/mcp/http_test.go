@@ -16,7 +16,7 @@ func TestSearchRejectsOldProtocol(t *testing.T) {
 	srv := startServer(t, serverOpts{
 		versions: []string{"2025-11-25"},
 	})
-	hub := New([]Server{{Name: "old", URL: srv.URL}})
+	hub := New("", []Server{{Name: "old", URL: srv.URL}})
 	t.Cleanup(func() { _ = hub.Close() })
 
 	got, err := hub.Search(t.Context(), "issue")
@@ -51,7 +51,7 @@ func TestCallAndList(t *testing.T) {
 			{name: "list_issues", description: "List issues"},
 		},
 	})
-	hub := New([]Server{{
+	hub := New("", []Server{{
 		Name: "github",
 		URL:  srv.URL,
 		Headers: map[string]string{

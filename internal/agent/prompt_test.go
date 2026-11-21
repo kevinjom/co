@@ -68,7 +68,7 @@ func TestSystemPromptNamesOneSearch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := systemPrompt(cwd, tt.lsp, nil, tt.search, false)
+			got := systemPrompt(cwd, tt.lsp, nil, tt.search, false, "")
 			if !strings.Contains(got, tt.want) {
 				t.Fatalf("prompt missing %q\n%s", tt.want, got)
 			}

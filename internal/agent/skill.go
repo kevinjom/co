@@ -40,7 +40,7 @@ func (s *Session) refreshPrompt() {
 	if s.catalog != nil {
 		listed = s.catalog.List()
 	}
-	s.messages[0].Content = systemPrompt(s.cwd, s.lsp, listed, s.tools.Search(), s.mcp)
+	s.messages[0].Content = systemPrompt(s.cwd, s.lsp, listed, s.tools.Search(), s.mcp, s.agentsmd)
 }
 
 // skillsNamed returns each skill mentioned as /name, in first-seen order.

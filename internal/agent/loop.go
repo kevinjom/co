@@ -98,6 +98,15 @@ func (s *Session) SetMaxToolRounds(n int) {
 	s.maxToolRounds = n
 }
 
+// SetAsker installs the function ask_user calls for later turns.
+// A nil asker makes that tool report that a terminal is required.
+func (s *Session) SetAsker(ask tools.Asker) {
+	if s == nil || s.tools == nil {
+		return
+	}
+	s.tools.SetAsker(ask)
+}
+
 // SetModel points later turns at a different endpoint and wire model id.
 // The message list is left as it is.
 func (s *Session) SetModel(client llm.Chatter, model string) {

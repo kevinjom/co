@@ -16,6 +16,7 @@ import (
 	"github.com/kevinjom/co/internal/config"
 	"github.com/kevinjom/co/internal/llm"
 	"github.com/kevinjom/co/internal/llm/openai"
+	"github.com/kevinjom/co/internal/tools"
 )
 
 func writeSSE(w http.ResponseWriter, chunks ...string) {
@@ -163,6 +164,66 @@ func TestTurnRunsToolThenAnswers(t *testing.T) {
 	}
 	toolMsg := followUp[3]
 	if toolMsg.Role != "tool" || toolMsg.ToolCallID != assistant.ToolCalls[0].ID || toolMsg.Content != done.Output {
+		t.Fatalf("tool message %+v", toolMsg)
+	}
+}
+
+func TestTurnAsksTheUserThenContinues(t *testing.T) {
+	var mu sync.Mutex
+	var calls []recordedChat
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
+		var call recordedChat
+		if err := json.Unmarshal(body, &call); err != nil {
+			t.Errorf("decode body: %v", err)
+			return
+		}
+		mu.Lock()
+		calls = append(calls, call)
+		n := len(calls)
+		mu.Unlock()
+
+		if n == 1 {
+			writeSSE(w, toolChunk("call_ask", "ask_user", `{"question":"Which database?","options":["postgres","sqlite"],"multiple":true}`))
+			return
+		}
+		writeSSE(w, contentChunk("using both"))
+	}))
+	defer server.Close()
+
+	session := NewSession(openai.New(server.URL), "test-model", t.TempDir(), nil)
+	var asked tools.Question
+	session.SetAsker(func(_ context.Context, question tools.Question) (string, error) {
+		asked = question
+		return "postgres\nsqlite", nil
+	})
+	got, err := session.Turn(t.Context(), "where should this live?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "using both" {
+		t.Fatalf("answer %q", got)
+	}
+	if asked.Text != "Which database?" || !asked.Multiple || len(asked.Options) != 2 {
+		t.Fatalf("asked %+v", asked)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %d", len(calls))
+	}
+	followUp := calls[1].Messages
+	if len(followUp) != 4 {
+		t.Fatalf("follow-up messages = %d", len(followUp))
+	}
+	toolMsg := followUp[3]
+	if toolMsg.Role != "tool" || toolMsg.ToolCallID != "call_ask" || toolMsg.Content != "postgres\nsqlite" {
 		t.Fatalf("tool message %+v", toolMsg)
 	}
 }

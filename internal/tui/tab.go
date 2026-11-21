@@ -58,6 +58,9 @@ type tab struct {
 	answered      bool
 	answerOpen    bool
 	reasoningOpen bool
+	ask           *pendingAsk
+	// held is composer text to restore when a cancelled question's turn ends.
+	held *string
 	// queue holds this session's unsent chat lines, oldest first.
 	// They join the conversation only when the current turn finishes.
 	queue []string
@@ -136,7 +139,11 @@ func (m *model) sessionCount() int {
 }
 
 func (m *model) stopTurn(item *tab) {
-	if item == nil || item.cancel == nil {
+	if item == nil {
+		return
+	}
+	m.dismissAsk(item)
+	if item.cancel == nil {
 		return
 	}
 	item.cancel()
@@ -154,6 +161,11 @@ func (m *model) switchTo(index int) {
 	m.focus = index
 	next := m.tab()
 	m.input.SetValue(next.draft)
+	if next.ask != nil {
+		m.input.Placeholder = answerPlaceholder
+	} else {
+		m.input.Placeholder = chatPlaceholder
+	}
 	m.layout()
 	m.paintFollow(next.follow)
 	if !next.follow {

@@ -108,11 +108,14 @@ func (m *model) statusLine() string {
 	return joinSides(m.usableWidth(), left, right)
 }
 
-// aboveInputHeight is the completion list and unsent queue drawn between the transcript and the box.
+// aboveInputHeight is the completion list, the open question, and the unsent queue drawn between the transcript and the box.
 func (m *model) aboveInputHeight() int {
 	height := 0
 	if extra := m.overlayView(); extra != "" {
 		height += lipgloss.Height(extra)
+	}
+	if ask := m.askView(); ask != "" {
+		height += lipgloss.Height(ask)
 	}
 	if queue := m.queueView(); queue != "" {
 		height += lipgloss.Height(queue)
@@ -161,12 +164,16 @@ func (m *model) queueLimit() int {
 	if extra := m.overlayView(); extra != "" {
 		overlayH = lipgloss.Height(extra)
 	}
+	askH := 0
+	if extra := m.askView(); extra != "" {
+		askH = lipgloss.Height(extra)
+	}
 	height := m.height
 	if height <= 0 {
 		height = 24
 	}
 	const frame = 5 // header, rule, status, help, and one transcript row
-	limit := height - frame - inputH - overlayH
+	limit := height - frame - inputH - overlayH - askH
 	if limit < 1 {
 		return 1
 	}
@@ -178,6 +185,8 @@ func (m *model) helpLine() string {
 	switch {
 	case m.filePickerArmed():
 		text = "up/down move  ·  tab insert  ·  enter insert  ·  esc close"
+	case m.asking():
+		text = askHelp(m.tab().ask)
 	case m.tab().busy && strings.TrimSpace(m.input.Value()) != "":
 		text = "enter queue  ·  ctrl+c clear"
 	case m.tab().busy && len(m.tab().queue) > 0:
@@ -524,6 +533,8 @@ func toolLabel(name string) string {
 		return "Grep"
 	case "bash":
 		return "Bash"
+	case "ask_user":
+		return "Ask"
 	default:
 		if name == "" {
 			return "tool"

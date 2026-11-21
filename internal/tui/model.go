@@ -222,7 +222,7 @@ func historyBlocks(session *agent.Session) []block {
 func newInput(th theme) textarea.Model {
 	ta := textarea.New()
 	ta.Prompt = ""
-	ta.Placeholder = "what do you want to cook"
+	ta.Placeholder = chatPlaceholder
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 64 * 1024
 	ta.MaxHeight = 6
@@ -400,6 +400,9 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.dismissFiles() {
 			return m, nil
 		}
+		if m.tab().ask != nil {
+			return m, nil
+		}
 		if m.session() == nil {
 			m.input.Reset()
 			m.stopComplete()
@@ -420,11 +423,17 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.moveCommand(-1) {
 			return m, nil
 		}
+		if m.moveAsk(-1) {
+			return m, nil
+		}
 	case "down":
 		if m.moveFile(1) {
 			return m, nil
 		}
 		if m.moveCommand(1) {
+			return m, nil
+		}
+		if m.moveAsk(1) {
 			return m, nil
 		}
 	case "enter", "ctrl+m":
@@ -434,8 +443,15 @@ func (m *model) onChatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.insertSkill() {
 			return m, nil
 		}
+		if m.submitAsk() {
+			return m, nil
+		}
 		m.acceptCommand()
 		return m, m.submit()
+	case "space":
+		if m.toggleAsk() {
+			return m, nil
+		}
 	case "tab":
 		if m.insertFile() {
 			return m, nil
@@ -688,6 +704,7 @@ func (m *model) startTurn(item *tab, lines []string) tea.Cmd {
 	pipe := newTurnPipe()
 	item.pipe = pipe
 	session := item.session
+	session.SetAsker(m.asker(item, turn, pipe))
 	go func() {
 		started := time.Now()
 		answer, err := session.Reply(ctx, sent, func(ev agent.Event) {
@@ -793,6 +810,7 @@ func (m *model) finishTurn(msg turnDoneMsg) (tea.Model, tea.Cmd) {
 
 	item.busy = false
 	item.activity = ""
+	m.restoreHeld(item)
 	item.answerOpen = false
 	showedReasoning := item.reasoningOpen
 	item.reasoningOpen = false
@@ -845,6 +863,8 @@ func (m *model) onPipe(msg pipeMsg) tea.Cmd {
 		switch next := next.(type) {
 		case eventMsg:
 			m.applyEvent(item, next)
+		case askMsg:
+			m.openAsk(item, next)
 		case turnDoneMsg:
 			_, cmd := m.finishTurn(next)
 			return cmd
@@ -1149,6 +1169,9 @@ func (m *model) frame() string {
 	parts := []string{m.headerLine(), m.transcriptView()}
 	if extra := m.overlayView(); extra != "" {
 		parts = append(parts, extra)
+	}
+	if ask := m.askView(); ask != "" {
+		parts = append(parts, ask)
 	}
 	if queue := m.queueView(); queue != "" {
 		parts = append(parts, queue)

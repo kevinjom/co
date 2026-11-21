@@ -7,7 +7,7 @@ import (
 	"github.com/kevinjom/co/internal/skill"
 )
 
-func systemPrompt(cwd string, lsp bool, listed []skill.Skill, search string, mcpOn bool) string {
+func systemPrompt(cwd string, lsp bool, listed []skill.Skill, search string, mcpOn bool, agentsmd string) string {
 	instruction := searchInstruction(search)
 	lines := []string{
 		"You are co, a coding assistant.",
@@ -56,6 +56,9 @@ func systemPrompt(cwd string, lsp bool, listed []skill.Skill, search string, mcp
 			lines = append(lines, sk.Name+": "+oneLine(sk.Description))
 		}
 		lines = append(lines, "When a message names a skill as /name, follow that skill for that turn only.")
+	}
+	if agentsmd != "" {
+		lines = append(lines, agentsmd)
 	}
 	return strings.Join(lines, "\n")
 }

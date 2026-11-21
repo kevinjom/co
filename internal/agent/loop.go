@@ -36,6 +36,7 @@ type Session struct {
 	attached      [][]skill.Skill
 	lsp           bool
 	mcp           bool
+	agentsmd      string
 	titleWG       sync.WaitGroup
 	titleMu       sync.Mutex
 	msgMu         sync.Mutex
@@ -47,6 +48,7 @@ type Session struct {
 // A nil recorder does not write history.
 func NewSession(client llm.Chatter, model, cwd string, recorder Recorder) *Session {
 	set := tools.New(cwd)
+	agentsmd := loadAgentsmd(cwd)
 	return &Session{
 		client:        client,
 		model:         model,
@@ -56,10 +58,11 @@ func NewSession(client llm.Chatter, model, cwd string, recorder Recorder) *Sessi
 		recorder:      recorder,
 		maxToolRounds: config.DefaultMaxToolRounds,
 		attached:      [][]skill.Skill{nil},
+		agentsmd:      agentsmd,
 		messages: []llm.Message{
 			{
 				Role:    "system",
-				Content: systemPrompt(cwd, false, nil, set.Search(), false),
+				Content: systemPrompt(cwd, false, nil, set.Search(), false, agentsmd),
 			},
 		},
 	}

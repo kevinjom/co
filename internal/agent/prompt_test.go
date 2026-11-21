@@ -108,6 +108,33 @@ func TestNewSessionPromptUsesInstalledSearch(t *testing.T) {
 	}
 }
 
+func TestSystemPromptAsksWhenBlocked(t *testing.T) {
+	t.Parallel()
+
+	session := NewSession(openai.New("http://127.0.0.1:1"), "m", t.TempDir(), nil)
+	prompt := session.Messages()[0].Content
+	for _, phrase := range []string{
+		"call ask_user",
+		"Ask one specific question.",
+		"keep the list to a handful",
+		"Set multiple to true",
+		"type their own words",
+	} {
+		if !strings.Contains(prompt, phrase) {
+			t.Fatalf("prompt missing %q\n%s", phrase, prompt)
+		}
+	}
+	found := false
+	for _, def := range session.defs {
+		if def.Function.Name == "ask_user" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("ask_user is not offered")
+	}
+}
+
 func TestEnableMCPMentionsTools(t *testing.T) {
 	t.Parallel()
 

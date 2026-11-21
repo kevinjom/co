@@ -73,6 +73,7 @@ func lineRepl(cmd *cobra.Command, signals *signalSession, app *command.App) erro
 		}
 
 		wrote := false
+		session.SetAsker(lineAsker(cmd.ErrOrStderr(), lines.read, interactive))
 		answer, err := session.Turn(signals.ctx, line, func(ev agent.Event) {
 			switch ev := ev.(type) {
 			case agent.AnswerDelta:

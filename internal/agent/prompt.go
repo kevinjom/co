@@ -30,6 +30,11 @@ func systemPrompt(cwd string, lsp bool, listed []skill.Skill, search string, mcp
 		"Use web_search when the answer is not in this directory.",
 		"Use web_fetch to read one http or https page.",
 		"If a tool returns an error, say so.",
+		"When you are blocked on a decision the user has to make, call ask_user.",
+		"Ask one specific question.",
+		"Add options when a short list would settle it, and keep the list to a handful.",
+		"Set multiple to true when more than one option can apply.",
+		"The user can pick those options and can also type their own words.",
 		"When you have enough information, reply in plain text and stop calling tools.",
 	}
 	if lsp {

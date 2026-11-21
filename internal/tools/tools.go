@@ -2,6 +2,7 @@
 // Filesystem tools are jailed to one directory. The bash tool can read the rest of the
 // disk and write anywhere.
 // Web tools search and fetch public pages.
+// ask_user waits for an answer from the person at the terminal.
 package tools
 
 import (
@@ -48,6 +49,7 @@ type Set struct {
 	search      searcher
 	tools       []tool
 	bashTimeout time.Duration
+	asker       Asker
 }
 
 // New returns the tools for root.
@@ -79,6 +81,7 @@ func newSet(root string, search searcher) *Set {
 		tool{schema: bashSchema(), run: set.bash},
 		tool{schema: webSearchSchema(), run: set.webSearch},
 		tool{schema: webFetchSchema(), run: set.webFetch},
+		tool{schema: askUserSchema(), run: set.askUser},
 	)
 	return set
 }

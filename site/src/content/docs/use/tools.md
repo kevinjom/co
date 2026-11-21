@@ -3,7 +3,7 @@ title: Tools
 description: The tools the model can call, and the directory jail around file tools.
 ---
 
-The model gets filesystem tools, jailed to the working directory, a shell command, web search and page fetch, and language-server tools when a server binary is on `PATH`. Today that is `gopls` for `.go` files. MCP servers in `~/.co/mcp.yaml` add `mcp_search` and `mcp_call`. See [Language server](../../tools/lsp/), [Bash](../../tools/bash/), and [MCP](../../tools/mcp/).
+The model gets filesystem tools, jailed to the working directory, a shell command, web search and page fetch, and language-server tools when a server binary is on `PATH`. Today that is `gopls` for `.go` files. It can also stop and ask you a question. MCP servers in `~/.co/mcp.yaml` add `mcp_search` and `mcp_call`. See [Language server](../../tools/lsp/), [Bash](../../tools/bash/), and [MCP](../../tools/mcp/).
 
 | Tool | |
 | --- | --- |
@@ -12,6 +12,7 @@ The model gets filesystem tools, jailed to the working directory, a shell comman
 | `create_file` | Create a new file. Fails if the path already exists. |
 | `edit_file` | Replace one snippet that appears once. Other bytes stay as they are. |
 | `bash` | Run a shell command. See [Bash](../../tools/bash/). |
+| `ask_user` | One clarifying question. Optional `options`. `multiple` allows more than one. |
 | `grep` | A Go regular expression. Skips `.git`. Returns at most 50 matches. |
 | `web_search` | DuckDuckGo search. Defaults to 8 results, at most 10. |
 | `web_fetch` | One http or https page, as Markdown. |
@@ -22,5 +23,7 @@ The model gets filesystem tools, jailed to the working directory, a shell comman
 | `lsp_diagnostics` | Diagnostics for one file, or the workspace when `path` is omitted. |
 | `mcp_search` | Search MCP servers configured in `~/.co/mcp.yaml`. |
 | `mcp_call` | Call one tool from an `mcp_search` hit. |
+
+`ask_user` waits for your answer, then the model keeps going in the same turn. The model adds `options` when a short list would settle the question, and sets `multiple` when more than one option can apply. You can pick options and type your own words. In the TUI, up and down move, space selects, and enter sends. A `co` process whose input is not a terminal returns an error for that call.
 
 Paths are resolved, and a path that leaves the directory is rejected. `create_file` only creates a missing file. `edit_file` replaces one snippet that appears once. Line and column start at 1. A language-server result may name a file outside the working directory, and it does not include that file's body. Rename, formatting, and code actions are not tools.

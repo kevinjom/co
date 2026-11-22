@@ -17,23 +17,23 @@ import (
 	"github.com/kevinjom/co/internal/transcript"
 )
 
-// running is one open conversation and its transcript.
+// running is one open conversation, its transcript, and its model.
 type running struct {
 	session *agent.Session
 	history *transcript.Writer
+	model   string
 }
 
 // App is the catalog and the sessions shared by both fronts.
 // The line reader uses the first session. The TUI can open more.
 type App struct {
-	cat           *provider.Catalog
+	models        *provider.Catalog
 	home          string
 	cwd           string
 	noHistory     bool
 	maxToolRounds int
 
 	running []running
-	model   string
 	lang    *lsp.Hub
 	mcp     *mcp.Hub
 	skills  *skill.Catalog
@@ -50,7 +50,7 @@ func New(cat *provider.Catalog, home, cwd string, noHistory bool, maxToolRounds 
 		slog.Info("language tools disabled", "reason", "no language server on PATH")
 	}
 	return &App{
-		cat:           cat,
+		models:        cat,
 		home:          home,
 		cwd:           cwd,
 		noHistory:     noHistory,
@@ -66,9 +66,20 @@ func (a *App) Ready() bool {
 	return len(a.running) > 0
 }
 
-// Model is the selected provider/model-id, or empty.
-func (a *App) Model() string {
-	return a.model
+// Model is the provider/model-id for session.
+// A nil session means the first one. An unknown session is empty.
+func (a *App) Model(session *agent.Session) string {
+	if session == nil {
+		if len(a.running) == 0 {
+			return ""
+		}
+		session = a.running[0].session
+	}
+	index := a.indexOf(session)
+	if index < 0 {
+		return ""
+	}
+	return a.running[index].model
 }
 
 // Session is the first conversation. It is nil until the first successful selection.
@@ -79,27 +90,28 @@ func (a *App) Session() *agent.Session {
 	return a.running[0].session
 }
 
-// Open starts another conversation on the current model.
-// The first session still comes from Activate or Resume.
-func (a *App) Open(ctx context.Context) (*agent.Session, error) {
-	if strings.TrimSpace(a.model) == "" || len(a.running) == 0 {
+// Open starts another conversation on from's model.
+// A nil from uses the first session. The first session still comes from Activate or Resume.
+func (a *App) Open(ctx context.Context, from *agent.Session) (*agent.Session, error) {
+	ref := a.Model(from)
+	if strings.TrimSpace(ref) == "" {
 		return nil, fmt.Errorf("select a model with /models")
 	}
-	client, wire, ref, err := a.openClient(ctx, a.model)
+	client, wire, resolved, err := a.openClient(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
-	return a.attach(client, wire, ref)
+	return a.attach(client, wire, resolved)
 }
 
 // Models lists configured provider/model-id values.
 func (a *App) Models(ctx context.Context) ([]string, error) {
-	return a.cat.List(ctx)
+	return a.models.List(ctx)
 }
 
 // Providers lists configured providers that accept an API key.
 func (a *App) Providers() []string {
-	return a.cat.Providers()
+	return a.models.Providers()
 }
 
 // Activate selects a model for startup and does not write ~/.co/config.yaml.
@@ -109,32 +121,32 @@ func (a *App) Activate(ctx context.Context, raw string) error {
 
 // Select selects a model from /models and records it as the next launch default.
 // A nil session retargets the first one, or creates it when none exists.
-// Any other session is retargeted alone.
+// Any other session is retargeted alone. Other sessions keep their model.
 func (a *App) Select(ctx context.Context, raw string, session *agent.Session) error {
 	return a.use(ctx, raw, true, session)
 }
 
 // CanConnect reports whether /connect is valid for this provider.
 func (a *App) CanConnect(id string) error {
-	return a.cat.CanConnect(id)
+	return a.models.CanConnect(id)
 }
 
 // Connect stores an API key for a provider that accepts one.
 func (a *App) Connect(id, key string) error {
-	return a.cat.SaveKey(id, key)
+	return a.models.SaveKey(id, key)
 }
 
 // SaveTheme stores the TUI palette. An isolated catalog leaves the settings file alone.
 func (a *App) SaveTheme(name string) error {
-	return a.cat.SaveTheme(name)
+	return a.models.SaveTheme(name)
 }
 
 // RejectConnect is the usage error for /connect when stdin is not a terminal.
 func (a *App) RejectConnect(id string) error {
-	if err := a.cat.CanConnect(id); err != nil {
+	if err := a.models.CanConnect(id); err != nil {
 		return err
 	}
-	p, err := a.cat.Lookup(id)
+	p, err := a.models.Lookup(id)
 	if err != nil {
 		return err
 	}
@@ -177,8 +189,7 @@ func (a *App) Resume(ctx context.Context, id, model string) error {
 	session.Restore(loaded.Messages)
 	session.BindSkills(restoredSkills(loaded.MessageSkills))
 	session.SetTitle(loaded.Title)
-	a.running = append(a.running, running{session: session, history: history})
-	a.model = ref
+	a.running = append(a.running, running{session: session, history: history, model: ref})
 	if ref != loaded.Model {
 		a.noteModel(session, ref)
 	}
@@ -246,7 +257,7 @@ func (a *App) use(ctx context.Context, raw string, persist bool, target *agent.S
 		return err
 	}
 	if persist {
-		if err := a.cat.SaveSelection(ref); err != nil {
+		if err := a.models.SaveSelection(ref); err != nil {
 			return err
 		}
 	}
@@ -258,23 +269,23 @@ func (a *App) use(ctx context.Context, raw string, persist bool, target *agent.S
 	if target == nil {
 		target = a.running[0].session
 	}
-	if a.indexOf(target) < 0 {
+	index := a.indexOf(target)
+	if index < 0 {
 		return fmt.Errorf("unknown session")
 	}
 
 	target.SetModel(client, wire)
-	if a.model != ref {
+	if a.running[index].model != ref {
 		a.noteModel(target, ref)
 	}
-	a.model = ref
+	a.running[index].model = ref
 	return nil
 }
 
 func (a *App) attach(client *openai.Client, wire, ref string) (*agent.Session, error) {
 	recorder, history := a.openHistory(ref)
 	session := a.newSession(client, wire, recorder)
-	a.running = append(a.running, running{session: session, history: history})
-	a.model = ref
+	a.running = append(a.running, running{session: session, history: history, model: ref})
 	return session, nil
 }
 
@@ -334,7 +345,7 @@ func (a *App) openClient(ctx context.Context, raw string) (*openai.Client, strin
 	if err != nil {
 		return nil, "", "", err
 	}
-	ep, err := a.cat.Endpoint(ref)
+	ep, err := a.models.Endpoint(ref)
 	if err != nil {
 		return nil, "", "", err
 	}

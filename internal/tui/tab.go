@@ -64,6 +64,8 @@ type tab struct {
 	// queue holds this session's unsent chat lines, oldest first.
 	// They join the conversation only when the current turn finishes.
 	queue []string
+	// model is this session's provider/model-id, shown in the header.
+	model string
 }
 
 func newTab(id int, session *agent.Session) tab {
@@ -160,6 +162,7 @@ func (m *model) switchTo(index int) {
 	current.follow = m.viewport.AtBottom()
 	m.focus = index
 	next := m.tab()
+	m.rememberModel()
 	m.input.SetValue(next.draft)
 	if next.ask != nil {
 		m.input.Placeholder = answerPlaceholder
@@ -230,6 +233,33 @@ func (m *model) focusedChoice() int {
 		}
 	}
 	return 0
+}
+
+// rememberModel copies the focused session's model into the header.
+// The director wins when it knows that session. Other sessions are left alone.
+func (m *model) rememberModel() {
+	item := m.tab()
+	name := item.model
+	if m.director != nil {
+		if got := m.director.Model(item.session); got != "" {
+			name = got
+		}
+	}
+	if name == "" {
+		return
+	}
+	item.model = name
+	m.modelName = name
+}
+
+// shownModel is the model drawn for the session on screen.
+func (m *model) shownModel() string {
+	if len(m.tabs) > 0 {
+		if name := m.tab().model; name != "" {
+			return name
+		}
+	}
+	return m.modelName
 }
 
 func (m *model) adoptSession(session *agent.Session) {

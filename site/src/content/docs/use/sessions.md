@@ -23,7 +23,7 @@ Flags, environment variables, and `config.yaml` are on [Settings](../../setup/se
 | `/models provider/model-id` | Switch the model for the session on screen. The choice is saved to `~/.co/config.yaml`, unless `--config` was set. |
 | `/connect` | List providers that accept an API key. |
 | `/connect provider` | Save an API key for that provider. |
-| `/new` | Start another session in the TUI and show it. Other sessions keep running. |
+| `/new` | Start another session in the TUI, on the model of the session on screen, and show it. Other sessions keep running. |
 | `/sessions` | Switch the session on screen. In the TUI this opens a picker. |
 | `/theme` | List palettes. In the TUI this opens a picker. |
 | `/theme name` | Switch the palette. The choice is saved to `~/.co/config.yaml`, unless `--config` was set. |

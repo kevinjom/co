@@ -561,6 +561,7 @@ type fakeDirector struct {
 	models       []string
 	providers    []string
 	picked       string
+	bySession    map[*agent.Session]string
 	session      *agent.Session
 	selected     *agent.Session
 	opened       []*agent.Session
@@ -576,9 +577,16 @@ func (f *fakeDirector) Models(context.Context) ([]string, error) { return f.mode
 func (f *fakeDirector) Select(_ context.Context, ref string, session *agent.Session) error {
 	f.picked = ref
 	f.selected = session
+	if session == nil {
+		return nil
+	}
+	if f.bySession == nil {
+		f.bySession = map[*agent.Session]string{}
+	}
+	f.bySession[session] = ref
 	return nil
 }
-func (f *fakeDirector) Open(context.Context) (*agent.Session, error) {
+func (f *fakeDirector) Open(_ context.Context, from *agent.Session) (*agent.Session, error) {
 	if f.openErr != nil {
 		return nil, f.openErr
 	}
@@ -586,11 +594,18 @@ func (f *fakeDirector) Open(context.Context) (*agent.Session, error) {
 	if dir == "" {
 		dir = "."
 	}
-	modelName := f.picked
+	modelName := f.Model(from)
+	if modelName == "" {
+		modelName = f.picked
+	}
 	if modelName == "" {
 		modelName = "test-model"
 	}
 	session := agent.NewSession(openai.New("http://127.0.0.1:1"), modelName, dir, nil)
+	if f.bySession == nil {
+		f.bySession = map[*agent.Session]string{}
+	}
+	f.bySession[session] = modelName
 	f.opened = append(f.opened, session)
 	return session, nil
 }
@@ -604,8 +619,16 @@ func (f *fakeDirector) SaveTheme(name string) error {
 	f.savedTheme = name
 	return nil
 }
-func (f *fakeDirector) Skills() []skill.Skill   { return f.skills }
-func (f *fakeDirector) Model() string           { return f.picked }
+func (f *fakeDirector) Skills() []skill.Skill { return f.skills }
+func (f *fakeDirector) Model(session *agent.Session) string {
+	if session != nil {
+		if name, ok := f.bySession[session]; ok {
+			return name
+		}
+		return ""
+	}
+	return f.picked
+}
 func (f *fakeDirector) Session() *agent.Session { return f.session }
 func (f *fakeDirector) Ready() bool             { return f.ready }
 func (f *fakeDirector) ExitNote() string        { return "" }
@@ -1326,6 +1349,88 @@ func TestSessionsCommandSwitchesTranscript(t *testing.T) {
 	}
 	if got.tabs[1].busy {
 		t.Fatal("switching canceled the other session")
+	}
+}
+
+func TestSwitchingSessionsShowsThatSessionModel(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().model = "ollama/alpha"
+	m.modelName = "ollama/alpha"
+	other := agent.NewSession(openai.New("http://127.0.0.1:1"), "beta", m.cwd, nil)
+	m.tabs = append(m.tabs, newTab(2, other))
+	m.tabs[1].model = "ollama/beta"
+	m.switchTo(1)
+	plain := ansi.Strip(m.View().Content)
+	if !strings.Contains(plain, "ollama/beta") || strings.Contains(plain, "ollama/alpha") {
+		t.Fatalf("view %q", plain)
+	}
+	m.switchTo(0)
+	plain = ansi.Strip(m.View().Content)
+	if !strings.Contains(plain, "ollama/alpha") || strings.Contains(plain, "ollama/beta") {
+		t.Fatalf("view %q", plain)
+	}
+}
+
+func TestSelectKeepsTheOtherSessionModel(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().model = "ollama/alpha"
+	m.modelName = "ollama/alpha"
+	other := agent.NewSession(openai.New("http://127.0.0.1:1"), "beta", m.cwd, nil)
+	m.tabs = append(m.tabs, newTab(2, other))
+	m.tabs[1].model = "ollama/beta"
+	m.switchTo(1)
+	m.director = &fakeDirector{ready: true, cwd: m.cwd}
+	m.input.SetValue("/models ollama/gamma")
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if cmd == nil {
+		t.Fatal("expected select")
+	}
+	updated, _ = got.Update(cmd().(selectDoneMsg))
+	got = updated.(*model)
+	if got.focus != 1 || got.tab().model != "ollama/gamma" || got.tabs[0].model != "ollama/alpha" {
+		t.Fatalf("focus %d focused %q other %q", got.focus, got.tab().model, got.tabs[0].model)
+	}
+	got.switchTo(0)
+	plain := ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "ollama/alpha") || strings.Contains(plain, "ollama/gamma") {
+		t.Fatalf("view %q", plain)
+	}
+}
+
+func TestNewSessionUsesTheFocusedModel(t *testing.T) {
+	m := newTestModel(t)
+	m.tab().model = "ollama/alpha"
+	m.modelName = "ollama/alpha"
+	other := agent.NewSession(openai.New("http://127.0.0.1:1"), "beta", m.cwd, nil)
+	m.tabs = append(m.tabs, newTab(2, other))
+	m.tabs[1].model = "ollama/beta"
+	m.switchTo(1)
+	m.director = &fakeDirector{
+		ready: true,
+		cwd:   m.cwd,
+		bySession: map[*agent.Session]string{
+			m.tabs[0].session: "ollama/alpha",
+			other:             "ollama/beta",
+		},
+	}
+	m.input.SetValue("/new")
+	updated, cmd := m.Update(press(tea.KeyEnter, 0))
+	got := updated.(*model)
+	if cmd == nil {
+		t.Fatal("expected a new session")
+	}
+	updated, _ = got.Update(cmd().(openedMsg))
+	got = updated.(*model)
+	if got.focus != 2 || got.tab().model != "ollama/beta" {
+		t.Fatalf("focus %d model %q", got.focus, got.tab().model)
+	}
+	if got.tabs[0].model != "ollama/alpha" {
+		t.Fatalf("first model %q", got.tabs[0].model)
+	}
+	plain := ansi.Strip(got.View().Content)
+	if !strings.Contains(plain, "ollama/beta") || strings.Contains(plain, "ollama/alpha") {
+		t.Fatalf("view %q", plain)
 	}
 }
 

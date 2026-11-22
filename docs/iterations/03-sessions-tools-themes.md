@@ -81,16 +81,16 @@ The TUI keeps every session opened in this process. Each one has its own transcr
 
 | Line | Line reader | TUI |
 | --- | --- | --- |
-| `/new` | Prints `available in the TUI`. | Opens another session on the current model and shows it. Other sessions keep running. |
+| `/new` | Prints `available in the TUI`. | Opens another session on the model of the session on screen and shows it. Other sessions keep running. |
 | `/sessions` | Prints `available in the TUI`. | Opens a picker of the sessions in this TUI. Typing filters titles. Enter switches. |
-| `/models provider/model-id` | Retargets the only session. | Retargets the session on screen. Later `/new` uses that model. Sessions left in the background keep their client. |
+| `/models provider/model-id` | Retargets the only session. | Retargets the session on screen. Other sessions keep their model. |
 | `exit`, `quit` | One resume line per transcript this process wrote. | The same lines on stderr. |
 
 A session with no model yet still says `select a model with /models`. `/new` says the same until the first session exists.
 
 The file is still `~/.co/projects/<project>/sessions/<id>.jsonl`, created on the first completed message, mode `0600`. `co session list` is the on-disk list. The panel on the right is only the sessions opened in this TUI.
 
-Switching sessions keeps each one's draft, scroll offset, and whether it was pinned to the bottom. The header shows the process model and the short path of the working directory.
+Switching sessions keeps each one's draft, scroll offset, model, and whether it was pinned to the bottom. The header shows that session's model and the short path of the working directory.
 
 ### The panel
 

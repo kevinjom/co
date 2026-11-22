@@ -45,14 +45,14 @@ providers:
 		0,
 	)
 	ctx := context.Background()
-	if _, err := app.Open(ctx); err == nil {
+	if _, err := app.Open(ctx, nil); err == nil {
 		t.Fatal("opened a session before a model was selected")
 	}
 	if err := app.Activate(ctx, "ollama/alpha"); err != nil {
 		t.Fatal(err)
 	}
 	first := app.Session()
-	second, err := app.Open(ctx)
+	second, err := app.Open(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +64,23 @@ providers:
 	}
 	if first.Model() != "alpha" || second.Model() != "beta" {
 		t.Fatalf("models %q %q", first.Model(), second.Model())
+	}
+	if app.Model(first) != "ollama/alpha" || app.Model(second) != "ollama/beta" {
+		t.Fatalf("refs %q %q", app.Model(first), app.Model(second))
+	}
+	third, err := app.Open(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Model() != "alpha" || app.Model(third) != "ollama/alpha" {
+		t.Fatalf("opened from first: wire %q ref %q", third.Model(), app.Model(third))
+	}
+	fourth, err := app.Open(ctx, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fourth.Model() != "beta" || app.Model(fourth) != "ollama/beta" {
+		t.Fatalf("opened from second: wire %q ref %q", fourth.Model(), app.Model(fourth))
 	}
 
 	msg := llm.Message{Role: "user", Content: "hello"}

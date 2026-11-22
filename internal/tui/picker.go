@@ -166,10 +166,10 @@ func (m *model) onSelected(msg selectDoneMsg) (tea.Model, tea.Cmd) {
 		m.addBlock(block{kind: blockError, text: msg.err.Error()})
 		return m, m.input.Focus()
 	}
-	m.modelName = m.director.Model()
 	if m.session() == nil {
 		m.adoptSession(m.director.Session())
 	}
+	m.rememberModel()
 	first := m.startup
 	m.mode = modeChat
 	m.startup = false

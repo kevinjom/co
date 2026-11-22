@@ -172,7 +172,7 @@ func runLineCommand(cmd *cobra.Command, signals *signalSession, app *command.App
 			fmt.Fprintln(stderr, err)
 			return true, nil
 		}
-		fmt.Fprintf(stderr, "model %s\n", app.Model())
+		fmt.Fprintf(stderr, "model %s\n", app.Model(app.Session()))
 		return true, nil
 	case command.KindStats:
 		session := app.Session()

@@ -156,8 +156,10 @@ func newModel(ctx context.Context, session *agent.Session, modelName, cwd, theme
 	if err != nil {
 		panic(err)
 	}
+	item := newTab(1, session)
+	item.model = modelName
 	m := &model{
-		tabs:      []tab{newTab(1, session)},
+		tabs:      []tab{item},
 		nextTab:   2,
 		ctx:       ctx,
 		modelName: modelName,
@@ -753,8 +755,9 @@ func (m *model) openSession() tea.Cmd {
 	}
 	director := m.director
 	ctx := m.ctx
+	from := m.session()
 	return func() tea.Msg {
-		session, err := director.Open(ctx)
+		session, err := director.Open(ctx, from)
 		return openedMsg{session: session, err: err}
 	}
 }
@@ -779,6 +782,7 @@ func (m *model) onOpened(msg openedMsg) (tea.Model, tea.Cmd) {
 		return m, m.input.Focus()
 	}
 	m.adoptSession(msg.session)
+	m.rememberModel()
 	return m, tea.Batch(m.input.Focus(), m.watchTitle(m.tab()))
 }
 
@@ -1288,8 +1292,8 @@ func Run(ctx context.Context, app Director, cwd string, clearScrollback bool, th
 	modelName := ""
 	var session *agent.Session
 	if app != nil && app.Ready() {
-		modelName = app.Model()
 		session = app.Session()
+		modelName = app.Model(session)
 	}
 	m := newModel(ctx, session, modelName, cwd, themeName)
 	m.director = app

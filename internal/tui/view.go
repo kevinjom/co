@@ -57,7 +57,7 @@ func inputChrome(focused bool, th theme) lipgloss.Style {
 }
 
 func (m *model) headerLine() string {
-	label := m.modelName
+	label := m.shownModel()
 	if label == "" {
 		label = "no model"
 	}
@@ -104,7 +104,7 @@ func (m *model) statusLine() string {
 	case !m.viewport.AtBottom():
 		left = m.theme.dim.Render("pgdn to follow")
 	}
-	right := m.theme.dim.Render(m.modelName)
+	right := m.theme.dim.Render(m.shownModel())
 	return joinSides(m.usableWidth(), left, right)
 }
 

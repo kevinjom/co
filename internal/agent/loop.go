@@ -288,16 +288,48 @@ func (s *Session) dropRecorder() {
 
 // wireMessages is the chat request. A stored user line that named a skill
 // is copied with that skill's text appended, so later turns send the same bytes.
+// After a summary, the request is the system prompt, that summary, and the
+// messages stored after it. Earlier turns stay in the session and are left out.
 func (s *Session) wireMessages() []llm.Message {
 	s.msgMu.Lock()
 	defer s.msgMu.Unlock()
-	out := make([]llm.Message, len(s.messages))
-	copy(out, s.messages)
-	for i := range out {
-		if i >= len(s.attached) {
+	return s.wireLocked()
+}
+
+// wireLocked builds the chat request. s.msgMu is held by the caller.
+func (s *Session) wireLocked() []llm.Message {
+	cut := -1
+	for i := len(s.messages) - 1; i >= 0; i-- {
+		if s.messages[i].Role == SummaryRole {
+			cut = i
 			break
 		}
-		out[i].Content = withSkills(out[i].Content, s.attached[i])
+	}
+	if cut < 0 {
+		out := make([]llm.Message, len(s.messages))
+		copy(out, s.messages)
+		for i := range out {
+			if i >= len(s.attached) {
+				break
+			}
+			out[i].Content = withSkills(out[i].Content, s.attached[i])
+		}
+		return out
+	}
+	out := []llm.Message{}
+	if len(s.messages) > 0 && s.messages[0].Role == "system" && cut != 0 {
+		out = append(out, s.messages[0])
+	}
+	out = append(out, llm.Message{
+		Role:    "user",
+		Content: summaryPrefix + s.messages[cut].Content,
+	})
+	for i := cut + 1; i < len(s.messages); i++ {
+		msg := s.messages[i]
+		if i < len(s.attached) {
+			msg.Content = withSkills(msg.Content, s.attached[i])
+		}
+		out = append(out, msg)
 	}
 	return out
 }

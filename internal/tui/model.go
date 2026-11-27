@@ -35,6 +35,7 @@ const (
 	blockError
 	blockNote
 	blockReasoning
+	blockSummary
 )
 
 type block struct {
@@ -55,6 +56,14 @@ type eventMsg struct {
 }
 
 type paintMsg struct{}
+
+type compactDoneMsg struct {
+	tabID   int
+	id      int
+	summary string
+	err     error
+	elapsed time.Duration
+}
 
 type turnDoneMsg struct {
 	tabID   int
@@ -205,6 +214,8 @@ func historyBlocks(session *agent.Session) []block {
 					toolID: call.ID,
 				})
 			}
+		case agent.SummaryRole:
+			blocks = append(blocks, block{kind: blockSummary, text: msg.Content})
 		case "tool":
 			if msg.ToolCallID == "" {
 				continue
@@ -337,6 +348,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case turnDoneMsg:
 		return m.finishTurn(msg)
+
+	case compactDoneMsg:
+		return m.finishCompact(msg)
 	}
 
 	if m.mode != modeChat {
@@ -651,6 +665,17 @@ func (m *model) submit() tea.Cmd {
 		}
 		m.addBlock(block{kind: blockNote, text: m.session().Stats().Text()})
 		return nil
+	case command.KindCompact:
+		m.input.Reset()
+		if m.session() == nil {
+			m.addBlock(block{kind: blockError, text: "select a model with /models"})
+			return nil
+		}
+		if m.tab().busy {
+			m.addBlock(block{kind: blockError, text: "wait for the turn to finish"})
+			return nil
+		}
+		return m.startCompact(m.tab())
 	case command.KindError:
 		m.input.Reset()
 		m.addBlock(block{kind: blockError, text: parsed.Err.Error()})
@@ -716,6 +741,45 @@ func (m *model) startTurn(item *tab, lines []string) tea.Cmd {
 			tabID:   tabID,
 			id:      turn,
 			answer:  answer,
+			err:     err,
+			elapsed: time.Since(started),
+		})
+	}()
+	if spinning {
+		return waitPipe(pipe)
+	}
+	return tea.Batch(waitPipe(pipe), m.spin.Tick)
+}
+
+// startCompact summarizes the session on screen. The earlier turns stay put.
+func (m *model) startCompact(item *tab) tea.Cmd {
+	if item == nil || item.session == nil {
+		return nil
+	}
+	spinning := m.anyBusy()
+	item.busy = true
+	item.state = statusWorking
+	item.activity = "compacting"
+	if item.id == m.tab().id {
+		m.layout()
+		m.paint()
+	}
+
+	item.turnID++
+	turn := item.turnID
+	tabID := item.id
+	ctx, cancel := context.WithCancel(m.ctx)
+	item.cancel = cancel
+	pipe := newTurnPipe()
+	item.pipe = pipe
+	session := item.session
+	go func() {
+		started := time.Now()
+		summary, err := session.Compact(ctx)
+		pipe.push(compactDoneMsg{
+			tabID:   tabID,
+			id:      turn,
+			summary: summary,
 			err:     err,
 			elapsed: time.Since(started),
 		})
@@ -849,6 +913,51 @@ func (m *model) finishTurn(msg turnDoneMsg) (tea.Model, tea.Cmd) {
 	return m, m.input.Focus()
 }
 
+func (m *model) finishCompact(msg compactDoneMsg) (tea.Model, tea.Cmd) {
+	item := m.tabByID(msg.tabID)
+	if item == nil {
+		return m, nil
+	}
+	if msg.id != item.turnID {
+		return m, m.listen(item)
+	}
+	m.stopTurn(item)
+	if m.ctx.Err() != nil {
+		m.exitErr = m.ctx.Err()
+		m.quitting = true
+		return m, tea.Quit
+	}
+
+	item.busy = false
+	item.activity = ""
+	switch {
+	case msg.err == nil:
+		item.state = statusDone
+		item.blocks = append(item.blocks, block{kind: blockSummary, text: msg.summary})
+		if msg.elapsed > 0 {
+			item.blocks = append(item.blocks, block{kind: blockNote, text: cookedFor(msg.elapsed)})
+		}
+	case errors.Is(msg.err, context.Canceled), errors.Is(msg.err, context.DeadlineExceeded):
+		item.state = statusInterrupted
+		item.blocks = append(item.blocks, block{kind: blockNote, text: "interrupted"})
+	default:
+		item.state = statusError
+		item.blocks = append(item.blocks, block{kind: blockError, text: msg.err.Error()})
+	}
+	cmd := m.drainQueue(item)
+	if item.id == m.tab().id {
+		m.layout()
+		m.paint()
+	}
+	if cmd != nil {
+		return m, cmd
+	}
+	if item.id != m.tab().id {
+		return m, nil
+	}
+	return m, m.input.Focus()
+}
+
 func (m *model) onEvents(msg eventMsg) tea.Cmd {
 	item := m.tabByID(msg.tabID)
 	if item == nil {
@@ -871,6 +980,9 @@ func (m *model) onPipe(msg pipeMsg) tea.Cmd {
 			m.openAsk(item, next)
 		case turnDoneMsg:
 			_, cmd := m.finishTurn(next)
+			return cmd
+		case compactDoneMsg:
+			_, cmd := m.finishCompact(next)
 			return cmd
 		default:
 			panic(fmt.Sprintf("unhandled turn message %T", next))

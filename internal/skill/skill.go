@@ -52,6 +52,7 @@ var reserved = map[string]bool{
 	"sessions": true,
 	"theme":    true,
 	"skill":    true,
+	"compact":  true,
 }
 
 // Load reads skills from <cwd>/.agents/skills and <home>/.co/skills.

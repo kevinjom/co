@@ -19,6 +19,7 @@ const (
 	KindTheme
 	KindSkill
 	KindStats
+	KindCompact
 	KindError
 )
 
@@ -37,10 +38,11 @@ const (
 	cmdTheme    = "/theme"
 	cmdSkill    = "/skill"
 	cmdStats    = "/stats"
+	cmdCompact  = "/compact"
 )
 
 func slashCommands() []string {
-	return []string{cmdModels, cmdConnect, cmdNew, cmdSessions, cmdStats, cmdTheme, cmdSkill}
+	return []string{cmdModels, cmdConnect, cmdNew, cmdSessions, cmdStats, cmdCompact, cmdTheme, cmdSkill}
 }
 
 // Parse classifies a line before it can become a chat turn.
@@ -51,6 +53,7 @@ func slashCommands() []string {
 // /new starts another session. /sessions lists the open ones.
 // /theme lists palettes. /theme <name> selects one.
 // /stats prints counts for the current session.
+// /compact summarizes the conversation the model is using.
 // exit and quit leave the session.
 func Parse(line string, skills []string) Parsed {
 	line = strings.TrimSpace(line)
@@ -92,6 +95,11 @@ func Parse(line string, skills []string) Parsed {
 			return Parsed{Kind: KindError, Err: errors.New("usage: /stats")}
 		}
 		return Parsed{Kind: KindStats}
+	case cmdCompact:
+		if arg != "" {
+			return Parsed{Kind: KindError, Err: errors.New("usage: /compact")}
+		}
+		return Parsed{Kind: KindCompact}
 	case cmdSkill:
 		if arg == "" {
 			return Parsed{Kind: KindSkill}

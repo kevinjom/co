@@ -12,7 +12,9 @@ import (
 	palette "github.com/kevinjom/co/internal/theme"
 )
 
-const pickerWindow = 8
+// pickerWindow is the visible rows of a list.
+// Nine fits the slash commands and the first skill together.
+const pickerWindow = 9
 
 type modelsLoadedMsg struct {
 	ids []string
@@ -93,7 +95,8 @@ func (m *model) takeFilterCommand() (bool, tea.Cmd) {
 		m.paint()
 		return true, nil
 	case command.KindQuit, command.KindModels, command.KindConnect, command.KindNew,
-		command.KindSessions, command.KindTheme, command.KindSkill, command.KindStats:
+		command.KindSessions, command.KindTheme, command.KindSkill, command.KindStats,
+		command.KindCompact:
 		m.filter = ""
 		m.pickerErr = ""
 		m.mode = modeChat

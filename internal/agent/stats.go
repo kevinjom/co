@@ -8,7 +8,7 @@ import (
 )
 
 // Stats counts one session.
-// Token fields come from provider usage on kept assistant messages.
+// Token fields come from provider usage on kept assistant messages and summaries.
 // A title request is not one of those messages.
 type Stats struct {
 	UserTurns        int
@@ -17,7 +17,7 @@ type Stats struct {
 	Input            int
 	Output           int
 	LatestInput      int
-	// Requests is the number of kept assistant messages, one per model request.
+	// Requests is the number of kept assistant messages and summaries, one per model request.
 	Requests int
 	// Reported is how many of those requests included provider usage.
 	Reported int
@@ -41,9 +41,9 @@ func (s *Session) Stats() Stats {
 		switch msg.Role {
 		case "user":
 			st.UserTurns++
-		case "assistant":
+		case "assistant", SummaryRole:
 			st.Requests++
-			if strings.TrimSpace(msg.Content) != "" {
+			if msg.Role == "assistant" && strings.TrimSpace(msg.Content) != "" {
 				st.AssistantAnswers++
 			}
 			if msg.Usage != nil {

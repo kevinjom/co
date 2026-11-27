@@ -409,6 +409,8 @@ func (m *model) renderBlock(block block, width int) string {
 		out = renderError(block.text, width, th)
 	case blockNote:
 		out = renderInset(th.dim.Render(hang("· ", block.text, insetWidth(width))), width)
+	case blockSummary:
+		out = m.renderSummary(block.text, width)
 	default:
 		panic(fmt.Sprintf("unknown block kind %d", block.kind))
 	}
@@ -423,6 +425,15 @@ func renderUser(text string, width int, th theme) string {
 	}
 	body := hang(th.accent.Bold(true).Render("❯ "), text, inner)
 	return prefixLines(body, bar)
+}
+
+func (m *model) renderSummary(text string, width int) string {
+	label := m.theme.dim.Bold(true).Render("summary")
+	body := m.md.render(m.theme, text, insetWidth(width), false)
+	if strings.TrimSpace(body) == "" {
+		return renderInset(label, width)
+	}
+	return renderInset(label+"\n"+body, width)
 }
 
 func renderReasoning(body string, width int, th theme) string {
